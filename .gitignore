@@ -1,0 +1,4 @@
+.env
+models/saved_models/
+data/raw/
+__pycache__/
