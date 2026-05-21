@@ -7,3 +7,10 @@ dnspython>=2.3.0
 dkimpy>=1.1.0
 streamlit>=1.25.0
 scikit-learn>=1.2.0
+pandas
+numpy
+torch
+datasets
+seaborn
+matplotlib
+streamlit
