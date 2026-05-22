@@ -101,13 +101,12 @@ with col_results:
                 rp_ok = soc["return_path"] and soc["from_"]
                 st.markdown(f"**Return-Path:** `{soc['return_path'] or '—'}`")
                 st.markdown(f"**Errors-To:** `{soc['errors_to'] or '—'}`")
-                if soc["reply_to"]:
-                    reply_icon = "🔴 MISMATCH" if soc["reply_to_mismatch"] else "✅ Coerente"
+
+                #Nuovo codice (Fix con controllo Reply-To assente):
+                if not soc.get("reply_to"):
+                                    reply_icon = "⚪ Assente"
                 else:
-                    reply_icon = "⚪ Assente"
-                    
-                
-    
+                    reply_icon = "🔴 MISMATCH" if soc["reply_to_mismatch"] else "✅ Coerente"
                 st.markdown(
                     f"**Reply-To:** `{soc['reply_to'] or '—'}` — {reply_icon}"
                 )
@@ -352,7 +351,30 @@ with col_results:
 
             # ── 1e. Corpo testo ────────────────────────────────────────────
             with st.expander("📄 Corpo Email (testo estratto)"):
-                st.text_area("Body:", soc["body"] or "(vuoto)", height=200)
+                body_source = soc.get("body_source", "unknown")
+                strip_applied = soc.get("html_strip_applied", False)
+
+                # Badge sorgente
+                if body_source == "text/plain":
+                    st.caption("📝 Sorgente: `text/plain` — nessuno stripping necessario")
+                elif body_source == "text/html":
+                    st.caption("🌐 Sorgente: `text/html` — stripping HTML applicato prima dell'analisi AI")
+                else:
+                    st.caption("⚠️ Corpo email non rilevato")
+
+                if strip_applied:
+                    # Mostra entrambe le versioni per permettere confronto
+                    tab_clean, tab_raw = st.tabs(["✅ Testo pulito (input BERT)", "🔍 HTML grezzo originale"])
+                    with tab_clean:
+                        st.text_area(
+                            "Testo dopo HTML stripping:",
+                            soc.get("body_clean") or "(vuoto dopo stripping)",
+                            height=220,
+                        )
+                    with tab_raw:
+                        st.code(soc.get("body_html") or "(nessun HTML)", language="html")
+                else:
+                    st.text_area("Body:", soc.get("body_clean") or soc["body"] or "(vuoto)", height=220)
 
             # ── 1f. Flags SOC summary ──────────────────────────────────────
             st.subheader("🚨 Riepilogo Flags SOC")
@@ -376,9 +398,15 @@ with col_results:
 
             # ── 2. REAL AI CONTENT ANALYSIS (BERT integration) ────────────
             st.subheader("🤖 Analisi Contenuto con Intelligenza Artificiale (BERT)")
-            
-            # Unisci Oggetto e Corpo dell'email per l'analisi testuale completa
-            email_text = f"Subject: {soc['subject'] or ''}\n\n{soc['body'] or ''}".strip()
+
+            # Usa body_clean (testo senza tag HTML) come input per BERT.
+            # Se il corpo era HTML grezzo, body_clean contiene il testo dopo
+            # stripping; se era già text/plain, body_clean è identico al body.
+            clean_body = soc.get("body_clean") or soc.get("body") or ""
+            email_text = f"Subject: {soc['subject'] or ''}\n\n{clean_body}".strip()
+
+            if soc.get("html_strip_applied"):
+                st.caption("ℹ️ Input BERT: testo estratto dopo HTML stripping — tag e commenti offuscanti rimossi.")
             
             if not email_text or email_text.lower() == "subject:":
                 st.warning("⚠️ Impossibile eseguire la classificazione: l'email non contiene testo significativo nel corpo o nell'oggetto.")

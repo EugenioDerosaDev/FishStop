@@ -4,6 +4,12 @@ import email
 from email import policy
 from typing import Optional
 
+try:
+    from bs4 import BeautifulSoup
+    _BS4_AVAILABLE = True
+except ImportError:
+    _BS4_AVAILABLE = False
+
 
 # ---------------------------------------------------------------------------
 # Magic Bytes database (Gary Kessler / File Signatures)
@@ -11,7 +17,7 @@ from typing import Optional
 MAGIC_BYTES: dict[str, list[bytes]] = {
     "pdf":  [b"%PDF"],
     "zip":  [b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"],
-    "docx": [b"PK\x03\x04"],   # docx/xlsx/pptx are zip-based
+    "docx": [b"PK\x03\x04"],
     "xlsx": [b"PK\x03\x04"],
     "pptx": [b"PK\x03\x04"],
     "exe":  [b"MZ"],
@@ -25,19 +31,18 @@ MAGIC_BYTES: dict[str, list[bytes]] = {
     "7z":   [b"7z\xbc\xaf\x27\x1c"],
     "gz":   [b"\x1f\x8b"],
     "bz2":  [b"BZh"],
-    "doc":  [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"],  # OLE2
+    "doc":  [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"],
     "xls":  [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"],
     "ppt":  [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"],
     "rtf":  [b"{\\rtf"],
     "html": [b"<!DOCTYPE", b"<html"],
     "xml":  [b"<?xml"],
-    "js":   [],   # no reliable magic bytes
+    "js":   [],
     "bat":  [],
     "ps1":  [],
     "sh":   [b"#!/"],
 }
 
-# Map content-type → expected extension(s)
 CONTENT_TYPE_TO_EXT: dict[str, list[str]] = {
     "application/pdf":       ["pdf"],
     "application/zip":       ["zip", "docx", "xlsx", "pptx"],
@@ -51,7 +56,7 @@ CONTENT_TYPE_TO_EXT: dict[str, list[str]] = {
     "application/x-7z-compressed":  ["7z"],
     "application/gzip":      ["gz"],
     "application/x-bzip2":  ["bz2"],
-    "application/octet-stream": [],  # unknown — check magic bytes only
+    "application/octet-stream": [],
     "image/png":  ["png"],
     "image/jpeg": ["jpg"],
     "image/gif":  ["gif"],
@@ -80,6 +85,67 @@ def _ext_from_filename(filename: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# HTML stripping
+# ---------------------------------------------------------------------------
+
+def _strip_html(html: str) -> str:
+    """
+    Converte HTML grezzo in testo pulito adatto all'analisi AI e ai controlli
+    testuali.
+
+    Strategia (in ordine):
+      1. BeautifulSoup (lxml > html.parser come backend) per un parsing robusto
+         che gestisce HTML malformato, encoding errors e tag annidati.
+      2. Rimozione di <script> e <style> prima dell'estrazione del testo, per
+         evitare che codice JS o CSS venga passato al modello.
+      3. Separatore '\n' tra i tag per preservare la struttura dei paragrafi.
+      4. Fallback regex se BeautifulSoup non è installato: rimuove tutti i tag
+         con un pattern greedy-safe e decodifica le entity HTML principali.
+         Meno preciso ma sempre meglio del testo grezzo.
+
+    Perché è importante:
+      Gli attaccanti inseriscono tag o commenti HTML invisibili in mezzo alle
+      parole (es. Pa<!-- x -->ypal, P<span style='display:none'>x</span>aypal)
+      per aggirare i filtri basati su stringhe. Senza stripping, BERT riceve
+      token sporchi e le regex sui link non trovano le URL reali.
+    """
+    if not html or not html.strip():
+        return ""
+
+    if _BS4_AVAILABLE:
+        try:
+            soup = BeautifulSoup(html, "lxml")
+        except Exception:
+            soup = BeautifulSoup(html, "html.parser")
+
+        # Rimuovi blocchi script e style — il loro contenuto non è testo leggibile
+        for tag in soup(["script", "style", "head"]):
+            tag.decompose()
+
+        # get_text con separatore newline per preservare la struttura dei paragrafi
+        text = soup.get_text(separator="\n")
+    else:
+        # Fallback regex: rimuovi tutti i tag HTML
+        text = re.sub(r"<[^>]+>", " ", html)
+        # Decodifica le entity HTML più comuni
+        text = (text
+                .replace("&amp;",  "&")
+                .replace("&lt;",   "<")
+                .replace("&gt;",   ">")
+                .replace("&nbsp;", " ")
+                .replace("&quot;", '"')
+                .replace("&#39;",  "'"))
+
+    # Normalizza whitespace: collassa spazi multipli e righe vuote consecutive
+    lines = [line.strip() for line in text.splitlines()]
+    lines = [l for l in lines if l]                      # rimuovi righe vuote
+    cleaned = "\n".join(lines)
+    cleaned = re.sub(r" {2,}", " ", cleaned)             # spazi multipli → singolo
+
+    return cleaned.strip()
+
+
+# ---------------------------------------------------------------------------
 # Received chain parser
 # ---------------------------------------------------------------------------
 _IP_RE = re.compile(r"\[(\d{1,3}(?:\.\d{1,3}){3})\]")
@@ -98,7 +164,6 @@ def _parse_received_hop(raw: str) -> dict:
         parenthetical = m.group(2) or ""
         ip_m = _IP_RE.search(parenthetical) or _IP_RE.search(raw)
         hop["sender_ip"] = ip_m.group(1) if ip_m else None
-        # Try to grab a service name inside parenthetical (e.g. "emkei.cz")
         parts = [p.strip() for p in parenthetical.replace("[", "").replace("]", "").split()]
         hop["sender_domain"] = parts[0] if parts and not parts[0][0].isdigit() else None
 
@@ -129,8 +194,8 @@ _AUTH_FIELD_RE = re.compile(
 def _parse_auth_results(raw: str) -> dict:
     results: dict = {}
     for m in _AUTH_FIELD_RE.finditer(raw):
-        proto  = m.group(1).upper()
-        status = m.group(2).lower()
+        proto    = m.group(1).upper()
+        status   = m.group(2).lower()
         identity = m.group(3) or ""
         results[proto] = {"status": status, "identity": identity, "raw": m.group(0).strip()}
     return results
@@ -149,9 +214,14 @@ class EmlSOCAnalyzer:
 
     def analyze(self, eml_path: str) -> dict:
         with open(eml_path, "rb") as f:
-            msg = email.message_from_binary_file(f, policy=policy.compat32)
+            raw_bytes = f.read()
+
+        msg = email.message_from_bytes(raw_bytes, policy=policy.compat32)
 
         report: dict = {}
+
+        # Conserva i byte grezzi per la verifica crittografica DKIM
+        report["raw_eml_bytes"] = raw_bytes
 
         # ------------------------------------------------------------------ #
         # 1. Basic envelope fields
@@ -200,10 +270,12 @@ class EmlSOCAnalyzer:
         raw_received = msg.get_all("Received") or []
         hops = [_parse_received_hop(r) for r in raw_received]
         report["received_hops"] = hops
-        # Convenience aliases
         report["closest_to_recipient"] = hops[0]  if hops else {}
         report["injection_server"]     = hops[1]  if len(hops) > 1 else {}
         report["closest_to_sender"]    = hops[-1] if hops else {}
+
+        # Convenience: IP del server di iniezione (usato dai validator SPF)
+        report["injection_sender_ip"] = (report["injection_server"] or {}).get("sender_ip")
 
         # ------------------------------------------------------------------ #
         # 6. Received-SPF raw line
@@ -213,7 +285,7 @@ class EmlSOCAnalyzer:
         # ------------------------------------------------------------------ #
         # 7. Authentication-Results (parsed)
         # ------------------------------------------------------------------ #
-        auth_raw = self._header(msg, "Authentication-Results") or ""
+        auth_raw     = self._header(msg, "Authentication-Results") or ""
         arc_auth_raw = report["arc_authentication_results"] or ""
         report["auth_results"]     = _parse_auth_results(auth_raw)
         report["arc_auth_results"] = _parse_auth_results(arc_auth_raw)
@@ -227,37 +299,58 @@ class EmlSOCAnalyzer:
         # ------------------------------------------------------------------ #
         # 9. Body parts & attachments (with magic byte check)
         # ------------------------------------------------------------------ #
-        body_parts       = []
+        body_parts       = []   # text/plain parti (priorità)
+        html_parts       = []   # text/html parti (fallback)
         attachments_info = []
 
         for part in msg.walk():
-            ct          = part.get_content_type()
-            disp        = str(part.get("Content-Disposition") or "")
-            encoding    = str(part.get("Content-Transfer-Encoding") or "").lower().strip()
-            filename    = part.get_filename() or ""
-            is_attach   = "attachment" in disp.lower()
+            ct       = part.get_content_type()
+            disp     = str(part.get("Content-Disposition") or "")
+            encoding = str(part.get("Content-Transfer-Encoding") or "").lower().strip()
+            filename = part.get_filename() or ""
+            is_attach = "attachment" in disp.lower()
 
             if is_attach or filename:
                 raw_payload = part.get_payload(decode=False)
-                attachment_entry = self._analyze_attachment(
+                attachments_info.append(self._analyze_attachment(
                     filename=filename,
                     content_type=ct,
                     encoding=encoding,
                     raw_payload=raw_payload,
-                )
-                attachments_info.append(attachment_entry)
+                ))
             elif ct == "text/plain":
                 payload = part.get_payload(decode=True)
                 if payload:
                     charset = part.get_content_charset() or "utf-8"
                     body_parts.append(payload.decode(charset, errors="ignore"))
-            elif ct == "text/html" and not body_parts:
+            elif ct == "text/html":
                 payload = part.get_payload(decode=True)
                 if payload:
                     charset = part.get_content_charset() or "utf-8"
-                    body_parts.append(payload.decode(charset, errors="ignore"))
+                    html_parts.append(payload.decode(charset, errors="ignore"))
 
-        report["body"]        = "\n".join(body_parts).strip()
+        # body grezzo: text/plain se disponibile, altrimenti HTML grezzo come fallback
+        raw_body = "\n".join(body_parts) if body_parts else "\n".join(html_parts)
+        report["body"] = raw_body.strip()
+
+        # body_html: l'HTML grezzo originale (per rendering e analisi link futura)
+        report["body_html"] = "\n".join(html_parts).strip() if html_parts else None
+
+        # body_clean: testo pulito dai tag HTML — input canonico per BERT e analisi testuali.
+        # Se il body grezzo è già text/plain, non serve stripping; lo applichiamo
+        # solo se l'unica fonte disponibile era HTML.
+        if body_parts:
+            # Testo già pulito — normalizza solo whitespace
+            report["body_clean"] = re.sub(r"\n{3,}", "\n\n", report["body"]).strip()
+        else:
+            # Corpo era HTML: esegui stripping completo
+            combined_html = "\n".join(html_parts)
+            report["body_clean"] = _strip_html(combined_html)
+
+        # Segnala nel report quale metodo è stato usato (utile per debug nella UI)
+        report["body_source"]       = "text/plain" if body_parts else ("text/html" if html_parts else "empty")
+        report["html_strip_applied"] = (not bool(body_parts)) and bool(html_parts)
+
         report["attachments"] = attachments_info
 
         # ------------------------------------------------------------------ #
@@ -276,7 +369,6 @@ class EmlSOCAnalyzer:
         val = msg.get(name)
         if val is None:
             return None
-        # Collapse folded whitespace
         return re.sub(r"\s+", " ", str(val)).strip()
 
     @staticmethod
@@ -307,7 +399,6 @@ class EmlSOCAnalyzer:
             "anomaly": None,
         }
 
-        # Decode base64 to get actual bytes
         if encoding == "base64" and raw_payload:
             try:
                 if isinstance(raw_payload, str):
@@ -315,8 +406,8 @@ class EmlSOCAnalyzer:
                 else:
                     raw_bytes = base64.b64decode(raw_payload)
                 first16 = raw_bytes[:16]
-                entry["magic_bytes_hex"] = first16.hex().upper()
-                entry["magic_detected_format"] = _identify_magic_bytes(raw_bytes)
+                entry["magic_bytes_hex"]        = first16.hex().upper()
+                entry["magic_detected_format"]  = _identify_magic_bytes(raw_bytes)
             except Exception as exc:
                 entry["anomaly"] = f"Base64 decode error: {exc}"
                 return entry
@@ -324,8 +415,7 @@ class EmlSOCAnalyzer:
             entry["anomaly"] = "Non-base64 attachment — raw bytes not decoded"
             return entry
 
-        # Compare content-type expected extensions vs filename extension vs magic bytes
-        ct_base = content_type.split(";")[0].strip().lower()
+        ct_base       = content_type.split(";")[0].strip().lower()
         expected_exts = CONTENT_TYPE_TO_EXT.get(ct_base, [])
         file_ext      = entry["extension_from_filename"]
         magic_fmt     = entry["magic_detected_format"]
@@ -336,7 +426,6 @@ class EmlSOCAnalyzer:
                 f"Content-Type '{ct_base}' expects {expected_exts} but filename has '.{file_ext}'"
             )
         if magic_fmt and file_ext and magic_fmt != file_ext:
-            # Special case: zip-based Office formats share the same magic bytes
             zip_like = {"docx", "xlsx", "pptx", "zip"}
             if not (magic_fmt == "zip" and file_ext in zip_like):
                 mismatches.append(
@@ -386,6 +475,12 @@ class EmlSOCAnalyzer:
         if report["reply_to_mismatch"]:
             flag("HIGH", "Reply-To",
                  f"Reply-To ({report['reply_to']}) differs da From ({report['from_']}) — possibile harvesting")
+
+        # HTML stripping applicato — segnala che il corpo era HTML puro
+        if report.get("html_strip_applied"):
+            flag("INFO", "Body",
+                 "Corpo email in formato HTML puro: tag rimossi prima dell'analisi AI. "
+                 "Possibile offuscamento testuale nascosto nei tag.")
 
         # Injection server anomaly
         inj = report.get("injection_server", {})
