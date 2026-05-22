@@ -101,8 +101,13 @@ with col_results:
                 rp_ok = soc["return_path"] and soc["from_"]
                 st.markdown(f"**Return-Path:** `{soc['return_path'] or '—'}`")
                 st.markdown(f"**Errors-To:** `{soc['errors_to'] or '—'}`")
-
-                reply_icon = "🔴 MISMATCH" if soc["reply_to_mismatch"] else "✅ Coerente"
+                if soc["reply_to"]:
+                    reply_icon = "🔴 MISMATCH" if soc["reply_to_mismatch"] else "✅ Coerente"
+                else:
+                    reply_icon = "⚪ Assente"
+                    
+                
+    
                 st.markdown(
                     f"**Reply-To:** `{soc['reply_to'] or '—'}` — {reply_icon}"
                 )

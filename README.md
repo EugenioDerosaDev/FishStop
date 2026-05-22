@@ -30,3 +30,6 @@ tbshoot:
 git add . 
 git commit -m "msg" 
 git push origin main
+
+#how to run 
+./.venv/bin/streamlit run src/app.py
