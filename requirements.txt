@@ -14,3 +14,4 @@ datasets
 seaborn
 matplotlib
 streamlit
+torchvision

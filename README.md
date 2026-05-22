@@ -25,3 +25,8 @@ tbshoot:
 ./.venv/bin/pip install --upgrade "accelerate>=1.1.0" "transformers[torch]"
 
 ./.venv/bin/python src/train.py
+
+#github agg repo 
+git add . 
+git commit -m "msg" 
+git push origin main
