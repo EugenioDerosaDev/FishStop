@@ -530,16 +530,23 @@ class EmailSecurityValidator:
         """
         Controlla la reputazione di un dominio su AbuseIPDB.
 
-        Strategia a due livelli:
-          1. Prova il dominio direttamente tramite l'endpoint /check.
-          2. Se fallisce, risolve il dominio in IP via DNS e ripete il lookup.
+        Strategia:
+          1. Risolve il dominio in IP tramite dnspython (self.resolver) —
+             più affidabile di socket.gethostbyname() su Streamlit Cloud e
+             container con DNS di sistema limitato.
+          2. Interroga AbuseIPDB sull'IP risolto.
+
+        Se il dominio non risolve (NXDOMAIN, SERVFAIL, timeout) restituisce
+        status="skipped" con un messaggio esplicativo invece di "error", perché
+        un dominio inventato/inesistente non è un errore del sistema ma un dato
+        utile per il triage (dominio non registrato = anomalia).
 
         Returns
         -------
         Stessa struttura di check_ip_reputation, più:
           "domain_queried" : str
           "resolved_ip"    : str
-          "lookup_method"  : "direct" | "dns-fallback" | "skipped" | "error"
+          "lookup_method"  : "dns-resolved" | "skipped" | "error"
         """
         base = {
             "domain_queried":       domain,
@@ -568,46 +575,50 @@ class EmailSecurityValidator:
                     "lookup_method": "skipped",
                     "message": "API key AbuseIPDB non configurata — lookup saltato"}
 
-        try:
-            data = self._abuseipdb_call(domain)
-            if data:
-                result = self._format_abuseipdb(data, domain)
-                result["domain_queried"] = domain
-                result["resolved_ip"]    = data.get("ipAddress", "")
-                result["lookup_method"]  = "direct"
-                return result
-        except urllib.error.HTTPError as exc:
-            if exc.code not in (422, 400):
-                return {**base, "status": "error",
-                        "message": f"AbuseIPDB HTTP {exc.code}: {exc.reason}"}
-        except Exception:
-            pass
-
+        # ── 1. Risoluzione DNS tramite dnspython ──────────────────────────
         resolved_ip = ""
         try:
-            resolved_ip = socket.gethostbyname(domain)
+            answers = self.resolver.resolve(domain, "A")
+            resolved_ip = str(answers[0])
+        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+            # Dominio inesistente o senza record A: dato utile, non errore tecnico
+            return {**base, "status": "skipped",
+                    "lookup_method": "skipped",
+                    "message": (
+                        f"Il dominio `{domain}` non esiste o non ha record A — "
+                        "potrebbe essere un dominio inventato usato per il phishing"
+                    )}
+        except dns.resolver.NoNameservers:
+            return {**base, "status": "skipped",
+                    "lookup_method": "skipped",
+                    "message": f"Nessun nameserver raggiungibile per `{domain}`"}
+        except dns.exception.Timeout:
+            return {**base, "status": "skipped",
+                    "lookup_method": "skipped",
+                    "message": f"Timeout nella risoluzione DNS di `{domain}`"}
         except Exception as exc:
             return {**base, "status": "error",
-                    "lookup_method": "dns-fallback",
-                    "message": f"Impossibile risolvere il dominio `{domain}` in IP: {exc}"}
+                    "lookup_method": "error",
+                    "message": f"Errore DNS per `{domain}`: {exc}"}
 
+        # ── 2. Lookup AbuseIPDB sull'IP risolto ──────────────────────────
         try:
             data   = self._abuseipdb_call(resolved_ip)
             result = self._format_abuseipdb(data, resolved_ip)
             result["domain_queried"] = domain
             result["resolved_ip"]    = resolved_ip
-            result["lookup_method"]  = "dns-fallback"
+            result["lookup_method"]  = "dns-resolved"
             return result
         except urllib.error.HTTPError as exc:
             return {**base, "status": "error",
-                    "lookup_method": "dns-fallback",
+                    "lookup_method": "dns-resolved",
                     "resolved_ip":   resolved_ip,
-                    "message": f"AbuseIPDB HTTP {exc.code} (IP {resolved_ip}): {exc.reason}"}
+                    "message": f"AbuseIPDB HTTP {exc.code} per IP {resolved_ip}: {exc.reason}"}
         except Exception as exc:
             return {**base, "status": "error",
-                    "lookup_method": "dns-fallback",
+                    "lookup_method": "dns-resolved",
                     "resolved_ip":   resolved_ip,
-                    "message": f"Errore AbuseIPDB (IP {resolved_ip}): {exc}"}
+                    "message": f"Errore AbuseIPDB per IP {resolved_ip}: {exc}"}
 
     # ── VirusTotal — File Hash ─────────────────────────────────────────────
 

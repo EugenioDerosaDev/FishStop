@@ -494,15 +494,20 @@ else:
                 st.caption(f"**Ultima segnalazione:** {rep['lastReportedAt'][:10]}")
 
             method = rep.get("lookup_method", "")
-            if method == "dns-fallback" and rep.get("resolved_ip"):
-                st.caption(f"ℹ️ Lookup eseguito sull'IP risolto: `{rep['resolved_ip']}`")
-            elif method == "direct":
-                st.caption("ℹ️ Lookup eseguito direttamente sul dominio")
+            if method == "dns-resolved" and rep.get("resolved_ip"):
+                st.caption(f"ℹ️ Dominio risolto in IP `{rep['resolved_ip']}` via DNS")
 
             st.markdown(f"[🔗 Apri su AbuseIPDB]({rep['url']})")
 
         elif rep["status"] == "skipped":
-            st.info(f"ℹ️ {rep['message']}")
+            # Distingui dominio inesistente (info SOC utile) da skip per API key mancante
+            msg = rep.get("message", "")
+            if "non esiste" in msg or "NXDOMAIN" in msg or "non ha record A" in msg:
+                st.warning(f"⚠️ **Dominio non risolvibile** — {msg}")
+            elif "Timeout" in msg or "nameserver" in msg.lower():
+                st.warning(f"⏱️ **DNS timeout** — {msg}")
+            else:
+                st.info(f"ℹ️ {msg}")
         else:
             st.warning(f"⚠️ {rep['message']}")
 
