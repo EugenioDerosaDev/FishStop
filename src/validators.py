@@ -28,11 +28,11 @@ try:
 except ImportError:
     _DKIM_AVAILABLE = False
 
-# Il resto del file (helpers, EmailSecurityValidator, ecc.) rimane invariato.
+
 # ── helpers ────────────────────────────────────────────────────────────────
 
 def _extract_address(raw: Optional[str]) -> Optional[str]:
-    """Pull a bare address out of  'Display Name <user@domain>' or plain 'user@domain'."""
+    """Pull a bare address out of 'Display Name <user@domain>' or plain 'user@domain'."""
     if not raw:
         return None
     m = re.search(r"<([^>]+)>", raw)
@@ -90,8 +90,8 @@ class EmailSecurityValidator:
     def check_spf(
         self,
         sender_ip: str,
-        mail_from: str,           # Return-Path / MAIL FROM address (not From header)
-        helo_domain: str = "",    # optional HELO/EHLO hostname from Received header
+        mail_from: str,
+        helo_domain: str = "",
     ) -> dict:
         """
         Full SPF evaluation via pyspf.
@@ -108,27 +108,26 @@ class EmailSecurityValidator:
         {
           "status"     : "pass" | "fail" | "softfail" | "neutral" |
                          "none" | "permerror" | "temperror" | "error",
-          "record"     : str,   # the raw SPF TXT record found (if any)
-          "domain"     : str,   # the domain that was evaluated
+          "record"     : str,
+          "domain"     : str,
           "sender_ip"  : str,
           "mail_from"  : str,
           "message"    : str,
           "library"    : "pyspf" | "dns-presence-only"
         }
         """
-        addr = _extract_address(mail_from) or mail_from
+        addr   = _extract_address(mail_from) or mail_from
         domain = _extract_domain(addr)
 
         base = {
-            "sender_ip":  sender_ip,
-            "mail_from":  addr,
-            "domain":     domain,
-            "record":     "",
-            "library":    "pyspf",
+            "sender_ip": sender_ip,
+            "mail_from": addr,
+            "domain":    domain,
+            "record":    "",
+            "library":   "pyspf",
         }
 
         if not _SPF_AVAILABLE:
-            # Graceful degradation: presence-only check (old behaviour)
             base["library"] = "dns-presence-only"
             return {**base, **self._spf_presence_only(domain)}
 
@@ -137,17 +136,13 @@ class EmailSecurityValidator:
                     "message": "sender_ip o mail_from mancanti — impossibile valutare SPF"}
 
         try:
-            # pyspf.check2 returns (result, explanation)
             result, explanation = pyspf.check2(
                 i=sender_ip,
                 s=addr,
                 h=helo_domain or domain,
             )
-            result = (result or "none").lower()
-
-            # Try to retrieve the actual record for display purposes
+            result     = (result or "none").lower()
             record_str = self._fetch_spf_record(domain)
-
             return {
                 **base,
                 "status":  result,
@@ -188,9 +183,6 @@ class EmailSecurityValidator:
         """
         Cryptographic DKIM verification via dkimpy.
 
-        dkimpy fetches the public key from DNS at  <selector>._domainkey.<d=>
-        and verifies the hash of the canonicalized headers + body.
-
         Parameters
         ----------
         raw_eml_bytes : the complete raw bytes of the .eml file.
@@ -207,16 +199,13 @@ class EmailSecurityValidator:
         if not _DKIM_AVAILABLE:
             return self._dkim_presence_only(raw_eml_bytes)
 
-        # dkimpy can verify multiple signatures in one email
         signatures = []
-        overall = "none"
+        overall    = "none"
 
         try:
             d = dkim.DKIM(raw_eml_bytes)
-            # d.verify() verifies the *first* signature; iterate all headers for completeness
             sig_headers = [
                 v for k, v in (
-                    # email.message_from_bytes is lightweight here
                     __import__("email").message_from_bytes(raw_eml_bytes).items()
                 )
                 if k.lower() == "dkim-signature"
@@ -233,7 +222,6 @@ class EmailSecurityValidator:
             for idx, sig_raw in enumerate(sig_headers):
                 sig_info: dict = {"index": idx, "raw_header": sig_raw[:120] + "…"}
 
-                # Extract d= and s= for display
                 d_match = re.search(r"\bd=([^\s;]+)", sig_raw)
                 s_match = re.search(r"\bs=([^\s;]+)", sig_raw)
                 sig_info["d_domain"]  = d_match.group(1).rstrip(";") if d_match else "?"
@@ -243,8 +231,6 @@ class EmailSecurityValidator:
                 )
 
                 try:
-                    # Re-instantiate per signature so we always check the first one
-                    # dkimpy verifies from the raw bytes; for multi-sig we rebuild
                     verifier = dkim.DKIM(raw_eml_bytes)
                     ok = verifier.verify(idx=idx)
                     sig_info["result"]  = "pass" if ok else "fail"
@@ -258,7 +244,6 @@ class EmailSecurityValidator:
 
                 signatures.append(sig_info)
 
-            # Overall result: pass only if ALL signatures pass
             results = {s["result"] for s in signatures}
             if results == {"pass"}:
                 overall = "pass"
@@ -285,7 +270,7 @@ class EmailSecurityValidator:
     def _dkim_presence_only(self, raw_eml_bytes: bytes) -> dict:
         """Fallback when dkimpy is not installed."""
         import email as _email
-        msg = _email.message_from_bytes(raw_eml_bytes)
+        msg     = _email.message_from_bytes(raw_eml_bytes)
         present = bool(msg.get("DKIM-Signature"))
         return {
             "status":     "present" if present else "none",
@@ -295,25 +280,21 @@ class EmailSecurityValidator:
                 if present else
                 "Firma DKIM assente (installare dkimpy per la verifica crittografica)"
             ),
-            "library":    "presence-only",
+            "library": "presence-only",
         }
 
     # ── DMARC ─────────────────────────────────────────────────────────────
 
     def check_dmarc(
         self,
-        from_address: str,        # RFC5322 From header
-        spf_result: str,          # "pass" | "fail" | … from check_spf()
-        spf_domain: str,          # domain that SPF was evaluated against (Return-Path domain)
-        dkim_results: list,       # list of per-signature dicts from check_dkim()
+        from_address: str,
+        spf_result: str,
+        spf_domain: str,
+        dkim_results: list,
     ) -> dict:
         """
-        Full DMARC evaluation including:
-          • record lookup (with organizational-domain tree walk)
-          • policy parsing  (p=, sp=, pct=, adkim=, aspf=)
-          • SPF alignment check  (relaxed or strict)
-          • DKIM alignment check (relaxed or strict)
-          • final pass/fail disposition
+        Full DMARC evaluation including record lookup, policy parsing,
+        SPF/DKIM alignment check and final pass/fail disposition.
 
         Returns
         -------
@@ -321,16 +302,16 @@ class EmailSecurityValidator:
           "status"          : "pass" | "fail" | "none" | "error",
           "policy"          : "none" | "quarantine" | "reject",
           "subdomain_policy": str,
-          "pct"             : int,       # percentage of mail subject to policy
-          "adkim"           : "r" | "s", # relaxed / strict DKIM alignment
-          "aspf"            : "r" | "s", # relaxed / strict SPF alignment
+          "pct"             : int,
+          "adkim"           : "r" | "s",
+          "aspf"            : "r" | "s",
           "record"          : str,
-          "domain"          : str,       # organizational domain found
+          "domain"          : str,
           "spf_aligned"     : bool,
           "dkim_aligned"    : bool,
           "message"         : str,
-          "rua"             : str,       # aggregate report URI
-          "ruf"             : str,       # forensic report URI
+          "rua"             : str,
+          "ruf"             : str,
         }
         """
         from_addr   = _extract_address(from_address) or from_address
@@ -354,7 +335,6 @@ class EmailSecurityValidator:
             return {**base, "status": "error",
                     "message": "Impossibile estrarre il dominio dall'header From"}
 
-        # ── 1. Fetch DMARC record (with org-domain tree walk) ─────────────
         record, lookup_domain = self._fetch_dmarc_record(from_domain)
         if not record:
             return {**base, "status": "none",
@@ -363,15 +343,14 @@ class EmailSecurityValidator:
         base["domain"] = lookup_domain
         base["record"] = record
 
-        # ── 2. Parse tags ──────────────────────────────────────────────────
-        tags = _parse_dmarc_record(record)
-        policy          = tags.get("p",   "none")
-        subdomain_policy= tags.get("sp",  policy)    # sp= defaults to p=
-        pct             = int(tags.get("pct", "100"))
-        adkim           = tags.get("adkim", "r")      # r = relaxed, s = strict
-        aspf            = tags.get("aspf",  "r")
-        rua             = tags.get("rua",   "")
-        ruf             = tags.get("ruf",   "")
+        tags             = _parse_dmarc_record(record)
+        policy           = tags.get("p",   "none")
+        subdomain_policy = tags.get("sp",  policy)
+        pct              = int(tags.get("pct", "100"))
+        adkim            = tags.get("adkim", "r")
+        aspf             = tags.get("aspf",  "r")
+        rua              = tags.get("rua",   "")
+        ruf              = tags.get("ruf",   "")
 
         base.update({
             "policy":           policy,
@@ -383,13 +362,11 @@ class EmailSecurityValidator:
             "ruf":              ruf,
         })
 
-        # ── 3. SPF alignment ──────────────────────────────────────────────
         spf_aligned = False
         if spf_result == "pass" and spf_domain:
             spf_aligned = self._domains_aligned(spf_domain, from_domain, aspf)
         base["spf_aligned"] = spf_aligned
 
-        # ── 4. DKIM alignment ─────────────────────────────────────────────
         dkim_aligned = False
         for sig in (dkim_results or []):
             if sig.get("result") == "pass":
@@ -399,10 +376,8 @@ class EmailSecurityValidator:
                     break
         base["dkim_aligned"] = dkim_aligned
 
-        # ── 5. Final disposition ──────────────────────────────────────────
-        # DMARC passes if at least one aligned mechanism passes
         if spf_aligned or dkim_aligned:
-            status = "pass"
+            status      = "pass"
             aligned_via = []
             if spf_aligned:  aligned_via.append("SPF")
             if dkim_aligned: aligned_via.append("DKIM")
@@ -411,7 +386,7 @@ class EmailSecurityValidator:
                 f"(policy: {policy}, pct: {pct}%)"
             )
         else:
-            status = "fail"
+            status  = "fail"
             message = (
                 f"DMARC FAIL — né SPF né DKIM risultano allineati con il dominio From ({from_domain}). "
                 f"Policy applicata: {policy} ({pct}%)"
@@ -424,10 +399,9 @@ class EmailSecurityValidator:
         Fetch DMARC TXT record, walking up to the organizational domain if needed.
         Returns (record_text, lookup_domain) or ("", "").
         """
-        # Try exact domain first, then remove one label at a time (org-domain walk)
         labels = domain.split(".")
         for i in range(len(labels) - 1):
-            candidate = ".".join(labels[i:])
+            candidate  = ".".join(labels[i:])
             dmarc_host = f"_dmarc.{candidate}"
             try:
                 for rdata in self.resolver.resolve(dmarc_host, "TXT"):
@@ -451,14 +425,11 @@ class EmailSecurityValidator:
         if mode == "s":
             return check_domain == from_domain
 
-        # Relaxed: extract org domain (last two labels, ignoring ccTLD quirks)
         def org(d: str) -> str:
             parts = d.split(".")
             return ".".join(parts[-2:]) if len(parts) >= 2 else d
 
         return org(check_domain) == org(from_domain)
-
-    # ── AbuseIPDB ─────────────────────────────────────────────────────────
 
     # ── AbuseIPDB — metodo privato HTTP ───────────────────────────────────
 
@@ -466,7 +437,6 @@ class EmailSecurityValidator:
         """
         Chiamata raw all'API AbuseIPDB v2 per un singolo IP.
         Restituisce il dict "data" della risposta, o lancia eccezione.
-        Uso interno — usa check_ip_reputation / check_domain_reputation.
         """
         params = urllib.parse.urlencode({"ipAddress": ip, "maxAgeInDays": "90"})
         url    = f"{ABUSEIPDB_ENDPOINT}?{params}"
@@ -512,7 +482,7 @@ class EmailSecurityValidator:
         {
           "status"               : "ok" | "skipped" | "error",
           "ip"                   : str,
-          "abuseConfidenceScore" : int,   # 0–100
+          "abuseConfidenceScore" : int,
           "totalReports"         : int,
           "numDistinctUsers"     : int,
           "countryCode"          : str,
@@ -553,34 +523,32 @@ class EmailSecurityValidator:
         Controlla la reputazione di un dominio su AbuseIPDB.
 
         Strategia a due livelli:
-          1. Prova il dominio direttamente tramite l'endpoint /check
-             (AbuseIPDB accetta hostname oltre agli IP).
-          2. Se fallisce o non restituisce dati utili, risolve il dominio
-             in IP via DNS e ripete il lookup sull'IP.
+          1. Prova il dominio direttamente tramite l'endpoint /check.
+          2. Se fallisce, risolve il dominio in IP via DNS e ripete il lookup.
 
         Returns
         -------
         Stessa struttura di check_ip_reputation, più:
-          "domain_queried"   : str   — dominio originale passato in input
-          "resolved_ip"      : str   — IP risolto (se il fallback DNS è stato usato)
-          "lookup_method"    : "direct" | "dns-fallback" | "skipped" | "error"
+          "domain_queried" : str
+          "resolved_ip"    : str
+          "lookup_method"  : "direct" | "dns-fallback" | "skipped" | "error"
         """
         base = {
-            "domain_queried":      domain,
-            "resolved_ip":         "",
-            "lookup_method":       "error",
-            "ip":                  "",
+            "domain_queried":       domain,
+            "resolved_ip":          "",
+            "lookup_method":        "error",
+            "ip":                   "",
             "abuseConfidenceScore": 0,
-            "totalReports":        0,
-            "numDistinctUsers":    0,
-            "countryCode":         "",
-            "isp":                 "",
-            "domain":              "",
-            "isWhitelisted":       False,
-            "usageType":           "",
-            "lastReportedAt":      None,
-            "url":                 f"https://www.abuseipdb.com/check/{domain}",
-            "message":             "",
+            "totalReports":         0,
+            "numDistinctUsers":     0,
+            "countryCode":          "",
+            "isp":                  "",
+            "domain":               "",
+            "isWhitelisted":        False,
+            "usageType":            "",
+            "lastReportedAt":       None,
+            "url":                  f"https://www.abuseipdb.com/check/{domain}",
+            "message":              "",
         }
 
         if not domain:
@@ -592,7 +560,6 @@ class EmailSecurityValidator:
                     "lookup_method": "skipped",
                     "message": "API key AbuseIPDB non configurata — lookup saltato"}
 
-        # ── 1. Tentativo diretto con il dominio ───────────────────────────
         try:
             data = self._abuseipdb_call(domain)
             if data:
@@ -602,14 +569,12 @@ class EmailSecurityValidator:
                 result["lookup_method"]  = "direct"
                 return result
         except urllib.error.HTTPError as exc:
-            # 422 = AbuseIPDB non accetta questo hostname come IP → tentiamo DNS
             if exc.code not in (422, 400):
                 return {**base, "status": "error",
                         "message": f"AbuseIPDB HTTP {exc.code}: {exc.reason}"}
         except Exception:
-            pass  # qualsiasi altro errore → proviamo il fallback DNS
+            pass
 
-        # ── 2. Fallback: risoluzione DNS → lookup sull'IP ─────────────────
         resolved_ip = ""
         try:
             resolved_ip = socket.gethostbyname(domain)
@@ -619,7 +584,7 @@ class EmailSecurityValidator:
                     "message": f"Impossibile risolvere il dominio `{domain}` in IP: {exc}"}
 
         try:
-            data = self._abuseipdb_call(resolved_ip)
+            data   = self._abuseipdb_call(resolved_ip)
             result = self._format_abuseipdb(data, resolved_ip)
             result["domain_queried"] = domain
             result["resolved_ip"]    = resolved_ip
@@ -628,216 +593,195 @@ class EmailSecurityValidator:
         except urllib.error.HTTPError as exc:
             return {**base, "status": "error",
                     "lookup_method": "dns-fallback",
-                    "resolved_ip": resolved_ip,
+                    "resolved_ip":   resolved_ip,
                     "message": f"AbuseIPDB HTTP {exc.code} (IP {resolved_ip}): {exc.reason}"}
         except Exception as exc:
             return {**base, "status": "error",
                     "lookup_method": "dns-fallback",
-                    "resolved_ip": resolved_ip,
+                    "resolved_ip":   resolved_ip,
                     "message": f"Errore AbuseIPDB (IP {resolved_ip}): {exc}"}
 
-    """
-PATCH per validators.py
-=======================
-Aggiungere i due metodi qui sotto alla classe EmailSecurityValidator,
-subito dopo il metodo check_domain_reputation().
+    # ── VirusTotal — File Hash ─────────────────────────────────────────────
 
-Dipende da:
-  - VIRUSTOTAL_API_KEY già importata da src.config (patch precedente)
-  - urllib già importato nel modulo
+    def check_file_hash(self, sha256: str) -> dict:
+        """
+        Interroga VirusTotal v3 per la reputazione di un hash SHA-256.
 
-Nessuna dipendenza nuova — usa solo la stdlib.
-"""
+        Flusso:
+          GET /files/{sha256}
+            200 → file noto a VT, restituisce analisi completa
+            404 → file mai sottomesso a VT (non significa che sia pulito)
+            401 → API key non valida
+            429 → rate limit superato (free tier: 4 req/min)
 
+        Returns
+        -------
+        {
+          "status"           : "malicious" | "suspicious" | "clean" |
+                               "unknown"   | "not_found"  |
+                               "skipped"   | "error",
+          "sha256"           : str,
+          "malicious"        : int,
+          "suspicious"       : int,
+          "undetected"       : int,
+          "total_engines"    : int,
+          "detection_ratio"  : str,
+          "threat_label"     : str,
+          "file_type"        : str,
+          "file_name"        : str,
+          "first_submission" : str,
+          "last_analysis"    : str,
+          "permalink"        : str,
+          "message"          : str,
+        }
+        """
+        base = {
+            "sha256":           sha256,
+            "malicious":        0,
+            "suspicious":       0,
+            "undetected":       0,
+            "total_engines":    0,
+            "detection_ratio":  "—",
+            "threat_label":     "",
+            "file_type":        "",
+            "file_name":        "",
+            "first_submission": "",
+            "last_analysis":    "",
+            "permalink":        f"https://www.virustotal.com/gui/file/{sha256}",
+        }
 
-# ── VirusTotal — File Hash ─────────────────────────────────────────────────
+        if not sha256:
+            return {**base, "status": "skipped",
+                    "message": "Nessun hash fornito"}
+        if not VIRUSTOTAL_API_KEY:
+            return {**base, "status": "skipped",
+                    "message": "API key VirusTotal non configurata — lookup saltato"}
 
-def check_file_hash(self, sha256: str) -> dict:
-    """
-    Interroga VirusTotal v3 per la reputazione di un hash SHA-256.
+        url = f"{VIRUSTOTAL_ENDPOINT}/{sha256}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "x-apikey": VIRUSTOTAL_API_KEY,
+                "Accept":   "application/json",
+            },
+        )
 
-    Flusso:
-      GET /files/{sha256}
-        200 → file noto a VT, restituisce analisi completa
-        404 → file mai sottomesso a VT (non significa che sia pulito)
-        401 → API key non valida
-        429 → rate limit superato (free tier: 4 req/min)
-
-    Returns
-    -------
-    {
-      "status"           : "malicious" | "suspicious" | "clean" |
-                           "unknown"   | "not_found"  |
-                           "skipped"   | "error",
-      "sha256"           : str,
-      "malicious"        : int,   # engine che lo flaggano come malevolo
-      "suspicious"       : int,   # engine che lo flaggano come sospetto
-      "undetected"       : int,   # engine che lo giudicano pulito
-      "total_engines"    : int,   # totale engine che l'hanno analizzato
-      "detection_ratio"  : str,   # es. "3 / 72"
-      "threat_label"     : str,   # etichetta aggregata VT (es. "trojan.agent")
-      "file_type"        : str,   # tipo file rilevato da VT
-      "file_name"        : str,   # nome file originale (se noto a VT)
-      "first_submission" : str,   # data prima sottomissione (ISO)
-      "last_analysis"    : str,   # data ultima analisi (ISO)
-      "permalink"        : str,   # URL diretto al report VT
-      "message"          : str,
-    }
-    """
-    base = {
-        "sha256":           sha256,
-        "malicious":        0,
-        "suspicious":       0,
-        "undetected":       0,
-        "total_engines":    0,
-        "detection_ratio":  "—",
-        "threat_label":     "",
-        "file_type":        "",
-        "file_name":        "",
-        "first_submission": "",
-        "last_analysis":    "",
-        "permalink":        f"https://www.virustotal.com/gui/file/{sha256}",
-    }
-
-    if not sha256:
-        return {**base, "status": "skipped",
-                "message": "Nessun hash fornito"}
-
-    if not VIRUSTOTAL_API_KEY:
-        return {**base, "status": "skipped",
-                "message": "API key VirusTotal non configurata — lookup saltato"}
-
-    url = f"{VIRUSTOTAL_ENDPOINT}/{sha256}"
-    req = urllib.request.Request(
-        url,
-        headers={
-            "x-apikey": VIRUSTOTAL_API_KEY,
-            "Accept":   "application/json",
-        },
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        return self._format_vt_file(data, base)
-
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            return {**base, "status": "not_found",
-                    "message": "Hash non trovato su VirusTotal — file mai sottomesso o molto recente"}
-        if exc.code == 401:
-            return {**base, "status": "error",
-                    "message": "API key VirusTotal non valida (HTTP 401)"}
-        if exc.code == 429:
-            return {**base, "status": "error",
-                    "message": "Rate limit VirusTotal superato (free tier: 4 req/min) — riprova tra poco"}
-        return {**base, "status": "error",
-                "message": f"VirusTotal HTTP {exc.code}: {exc.reason}"}
-    except Exception as exc:
-        return {**base, "status": "error",
-                "message": f"Errore VirusTotal: {exc}"}
-
-
-@staticmethod
-def _format_vt_file(data: dict, base: dict) -> dict:
-    """
-    Normalizza la risposta JSON di VT /files/{hash} in un dict uniforme.
-
-    La risposta VT ha questa struttura:
-      data.attributes.last_analysis_stats  → contatori per categoria
-      data.attributes.popular_threat_classification.suggested_threat_label
-      data.attributes.type_description
-      data.attributes.names[0]
-      data.attributes.first_submission_date  (epoch int)
-      data.attributes.last_analysis_date     (epoch int)
-    """
-    import datetime
-
-    attrs = data.get("data", {}).get("attributes", {})
-    stats = attrs.get("last_analysis_stats", {})
-
-    malicious   = int(stats.get("malicious",   0))
-    suspicious  = int(stats.get("suspicious",  0))
-    undetected  = int(stats.get("undetected",  0))
-    harmless    = int(stats.get("harmless",    0))
-    total       = malicious + suspicious + undetected + harmless
-
-    # Threat label aggregata (es. "trojan.emotet")
-    ptc         = attrs.get("popular_threat_classification") or {}
-    threat_label = ptc.get("suggested_threat_label", "")
-
-    # Tipo file e nome originale
-    file_type = attrs.get("type_description", "")
-    names     = attrs.get("names") or []
-    file_name = names[0] if names else ""
-
-    # Date (epoch → ISO string)
-    def _epoch_to_iso(val) -> str:
-        if not val:
-            return ""
         try:
-            return datetime.datetime.fromtimestamp(
-                int(val), tz=datetime.timezone.utc
-            ).strftime("%Y-%m-%d %H:%M UTC")
-        except Exception:
-            return str(val)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            return self._format_vt_file(data, base)
 
-    first_sub  = _epoch_to_iso(attrs.get("first_submission_date"))
-    last_anal  = _epoch_to_iso(attrs.get("last_analysis_date"))
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return {**base, "status": "not_found",
+                        "message": "Hash non trovato su VirusTotal — file mai sottomesso o molto recente"}
+            if exc.code == 401:
+                return {**base, "status": "error",
+                        "message": "API key VirusTotal non valida (HTTP 401)"}
+            if exc.code == 429:
+                return {**base, "status": "error",
+                        "message": "Rate limit VirusTotal superato (free tier: 4 req/min) — riprova tra poco"}
+            return {**base, "status": "error",
+                    "message": f"VirusTotal HTTP {exc.code}: {exc.reason}"}
+        except Exception as exc:
+            return {**base, "status": "error",
+                    "message": f"Errore VirusTotal: {exc}"}
 
-    # Determina lo status sintetico
-    if malicious > 0:
-        status = "malicious"
-    elif suspicious > 0:
-        status = "suspicious"
-    elif total > 0:
-        status = "clean"
-    else:
-        status = "unknown"
+    @staticmethod
+    def _format_vt_file(data: dict, base: dict) -> dict:
+        """
+        Normalizza la risposta JSON di VT /files/{hash} in un dict uniforme.
 
-    detection_ratio = f"{malicious + suspicious} / {total}" if total else "0 / 0"
+        Struttura risposta VT:
+          data.attributes.last_analysis_stats
+          data.attributes.popular_threat_classification.suggested_threat_label
+          data.attributes.type_description
+          data.attributes.names[0]
+          data.attributes.first_submission_date  (epoch int)
+          data.attributes.last_analysis_date     (epoch int)
+        """
+        import datetime
 
-    message_parts = [f"{malicious} engine su {total} lo segnalano come malevolo"]
-    if suspicious:
-        message_parts.append(f"{suspicious} come sospetto")
-    if threat_label:
-        message_parts.append(f"minaccia rilevata: {threat_label}")
+        attrs = data.get("data", {}).get("attributes", {})
+        stats = attrs.get("last_analysis_stats", {})
 
-    return {
-        **base,
-        "status":           status,
-        "malicious":        malicious,
-        "suspicious":       suspicious,
-        "undetected":       undetected,
-        "total_engines":    total,
-        "detection_ratio":  detection_ratio,
-        "threat_label":     threat_label,
-        "file_type":        file_type,
-        "file_name":        file_name,
-        "first_submission": first_sub,
-        "last_analysis":    last_anal,
-        "message":          " — ".join(message_parts),
-    }
+        malicious  = int(stats.get("malicious",  0))
+        suspicious = int(stats.get("suspicious", 0))
+        undetected = int(stats.get("undetected", 0))
+        harmless   = int(stats.get("harmless",   0))
+        total      = malicious + suspicious + undetected + harmless
+
+        ptc          = attrs.get("popular_threat_classification") or {}
+        threat_label = ptc.get("suggested_threat_label", "")
+
+        file_type = attrs.get("type_description", "")
+        names     = attrs.get("names") or []
+        file_name = names[0] if names else ""
+
+        def _epoch_to_iso(val) -> str:
+            if not val:
+                return ""
+            try:
+                return datetime.datetime.fromtimestamp(
+                    int(val), tz=datetime.timezone.utc
+                ).strftime("%Y-%m-%d %H:%M UTC")
+            except Exception:
+                return str(val)
+
+        first_sub = _epoch_to_iso(attrs.get("first_submission_date"))
+        last_anal = _epoch_to_iso(attrs.get("last_analysis_date"))
+
+        if malicious > 0:
+            status = "malicious"
+        elif suspicious > 0:
+            status = "suspicious"
+        elif total > 0:
+            status = "clean"
+        else:
+            status = "unknown"
+
+        detection_ratio = f"{malicious + suspicious} / {total}" if total else "0 / 0"
+
+        message_parts = [f"{malicious} engine su {total} lo segnalano come malevolo"]
+        if suspicious:
+            message_parts.append(f"{suspicious} come sospetto")
+        if threat_label:
+            message_parts.append(f"minaccia rilevata: {threat_label}")
+
+        return {
+            **base,
+            "status":           status,
+            "malicious":        malicious,
+            "suspicious":       suspicious,
+            "undetected":       undetected,
+            "total_engines":    total,
+            "detection_ratio":  detection_ratio,
+            "threat_label":     threat_label,
+            "file_type":        file_type,
+            "file_name":        file_name,
+            "first_submission": first_sub,
+            "last_analysis":    last_anal,
+            "message":          " — ".join(message_parts),
+        }
+
 
 # ── smoke test ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     validator = EmailSecurityValidator()
 
-    # SPF — requires a real sender IP and Return-Path address
     print("=== SPF ===")
     spf = validator.check_spf(
-        sender_ip="209.85.220.41",       # a Gmail sending IP
+        sender_ip="209.85.220.41",
         mail_from="test@gmail.com",
     )
     print(spf)
 
-    # DMARC — requires spf/dkim results
     print("\n=== DMARC ===")
     dmarc = validator.check_dmarc(
         from_address="test@gmail.com",
         spf_result=spf["status"],
         spf_domain=spf["domain"],
-        dkim_results=[],                 # no DKIM sigs for this quick test
+        dkim_results=[],
     )
     print(dmarc)

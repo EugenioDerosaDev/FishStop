@@ -29,10 +29,10 @@ def init_backend():
         model_path   = company_path
         model_source = "company"
     elif os.path.isdir(base_path) and os.path.exists(os.path.join(base_path, "config.json")):
-        model_path   = base_path    # locale durante sviluppo
+        model_path   = base_path
         model_source = "base"
     else:
-        model_path   = HF_MODEL_ID  # Streamlit Cloud: scarica da HF
+        model_path   = HF_MODEL_ID
         model_source = "base"
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -100,9 +100,8 @@ if page == "🗃️ Dataset Builder":
             key=f"builder_uploader_{st.session_state.get('builder_uploader_gen', 0)}",
         )
     with reset_col:
-        st.markdown("&nbsp;", unsafe_allow_html=True)  # spacer verticale
+        st.markdown("&nbsp;", unsafe_allow_html=True)
         if st.button("🗑️ Reset", use_container_width=True, type="secondary", help="Svuota l'uploader e azzera tutte le label assegnate"):
-            # Pulisce cache bytes e label, poi ruota la key dell'uploader
             raw_cache_now = st.session_state.get("builder_raw_cache", {})
             for fname in list(raw_cache_now.keys()):
                 st.session_state.pop(f"label_{fname}", None)
@@ -116,9 +115,6 @@ if page == "🗃️ Dataset Builder":
         n_uploaded = len(uploaded_emls)
         st.markdown(f"**{n_uploaded} file caricati.** Assegna la label prima di procedere.")
 
-        # ── Leggi i bytes UNA VOLTA SOLA e metti in cache nella sessione ──
-        # Questo risolve il bug del puntatore consumato: upl.read() la
-        # seconda volta (dentro il loop di salvataggio) restituiva b"".
         cache_key = "builder_raw_cache"
         if cache_key not in st.session_state:
             st.session_state[cache_key] = {}
@@ -128,7 +124,6 @@ if page == "🗃️ Dataset Builder":
             if upl.name not in raw_cache:
                 raw_cache[upl.name] = upl.read()
 
-        # ── Assegnazione bulk ──────────────────────────────────────────────
         with st.container(border=True):
             bc1, bc2, bc3 = st.columns([2, 1, 1])
             with bc1:
@@ -147,18 +142,13 @@ if page == "🗃️ Dataset Builder":
 
         st.divider()
 
-        # ── Preview + selezione label per ogni file ────────────────────────
-        # Il preview usa i bytes già cachati — nessun seek/re-read.
-        # Con 500+ file mostriamo un expander collassato di default per
-        # non appesantire il rendering della pagina.
         import email as _email_mod
 
-        PREVIEW_THRESHOLD = 50  # sopra questa soglia si usa expander collassato
+        PREVIEW_THRESHOLD = 50
 
         assignments: dict[str, int] = {}
 
         def _quick_preview(raw: bytes) -> tuple[str, str, str]:
-            """Estrae From / Subject / inizio body senza fare il parse completo."""
             try:
                 msg = _email_mod.message_from_bytes(raw)
                 subject = str(msg.get("Subject") or "—").strip()
@@ -176,21 +166,16 @@ if page == "🗃️ Dataset Builder":
                 return "—", "—", ""
 
         def _render_file_row(upl_name: str, raw: bytes) -> int:
-            """Disegna la riga di preview + radio label. Restituisce il label scelto (0 o 1)."""
             sender, subject, body_pv = _quick_preview(raw)
 
-            # Priorità: 1) valore già in session_state per questo file —
-            #               può essere un int (0/1 scritto dal bottone bulk)
-            #               oppure una tupla ("✅ Legittima", 0) salvata dal widget radio
-            #            2) default 0 (Legittima) — mai phishing di default
             session_key = f"label_{upl_name}"
             existing = st.session_state.get(session_key)
             if existing is None:
                 default_idx = 0
             elif isinstance(existing, tuple):
-                default_idx = existing[1]    # ("✅ Legittima", 0) → 0
+                default_idx = existing[1]
             else:
-                default_idx = int(existing)  # int da bottone bulk (0 o 1)
+                default_idx = int(existing)
 
             with st.container(border=True):
                 c1, c2 = st.columns([3, 1])
@@ -211,11 +196,9 @@ if page == "🗃️ Dataset Builder":
             return label_choice[1]
 
         if n_uploaded <= PREVIEW_THRESHOLD:
-            # Mostra tutti i file direttamente
             for upl in uploaded_emls:
                 assignments[upl.name] = _render_file_row(upl.name, raw_cache[upl.name])
         else:
-            # Con molti file usiamo un expander per non bloccare il browser
             st.info(
                 f"ℹ️ {n_uploaded} file caricati. "
                 "L'anteprima dettagliata è collassata per migliorare le prestazioni. "
@@ -224,17 +207,14 @@ if page == "🗃️ Dataset Builder":
             with st.expander(f"📋 Mostra anteprima di tutti i {n_uploaded} file", expanded=False):
                 for upl in uploaded_emls:
                     assignments[upl.name] = _render_file_row(upl.name, raw_cache[upl.name])
-            # Assegna label di default per i file non ancora visualizzati nell'expander
             for upl in uploaded_emls:
                 if upl.name not in assignments:
                     val = st.session_state.get(f"label_{upl.name}", 0)
-                    # session_state può contenere un int (da bulk) o una tupla (da radio widget)
                     assignments[upl.name] = val[1] if isinstance(val, tuple) else int(val)
 
         st.divider()
 
         if st.button("💾 Aggiungi al Dataset", type="primary", use_container_width=True):
-            # ── Costruisce il batch con i bytes già cachati ─────────────────
             batch_items = [
                 (raw_cache[upl.name], upl.name, assignments.get(upl.name, 0))
                 for upl in uploaded_emls
@@ -248,7 +228,6 @@ if page == "🗃️ Dataset Builder":
                 pct  = int(done / total * 100)
                 progress_bar.progress(pct, text=f"Processing… {done}/{total}")
 
-            # add_batch: hash caricati 1 volta, CSV scritto 1 volta, .eml salvati in parallelo
             results = builder.add_batch(batch_items, progress_callback=_ui_progress)
 
             progress_bar.progress(100, text="Completato ✅")
@@ -267,8 +246,6 @@ if page == "🗃️ Dataset Builder":
                     errors += 1
                     error_lines.append(res["message"])
 
-            # Riepilogo compatto — non mostriamo un st.success per riga
-            # (con 500 file riempirebbe lo schermo)
             st.success(f"✅ **{added} aggiunte** | ⚠️ {skipped} duplicate | ❌ {errors} errori")
             if error_lines:
                 with st.expander(f"❌ Dettaglio {errors} errori"):
@@ -281,12 +258,10 @@ if page == "🗃️ Dataset Builder":
                 f"({new_stats['legitimate']} legittime, {new_stats['phishing']} phishing)"
             )
 
-            # Svuota la cache dei bytes e le label per liberare memoria e resettare la UI
             st.session_state.pop(cache_key, None)
             for upl in uploaded_emls:
                 st.session_state.pop(f"label_{upl.name}", None)
 
-            # Forza il rerun così i counter in cima (m1/m2/m3) leggono il CSV aggiornato
             st.rerun()
 
     st.divider()
@@ -346,11 +321,9 @@ if page == "🗃️ Dataset Builder":
             with col_yes:
                 if st.button("✅ Sì, cancella tutto", type="primary", use_container_width=True):
                     import shutil
-                    # Svuota il CSV (ricrea solo header)
                     with open(builder.csv_path, "w", newline="", encoding="utf-8") as f:
                         import csv as _csv
                         _csv.DictWriter(f, fieldnames=["xt_combined", "label", "source_file", "text_hash", "added_at"]).writeheader()
-                    # Cancella e ricrea le cartelle .eml
                     for folder in [builder.legit_folder, builder.phishing_folder]:
                         if os.path.isdir(folder):
                             shutil.rmtree(folder)
@@ -368,7 +341,6 @@ if page == "🗃️ Dataset Builder":
     # ── Addestra il modello aziendale ──────────────────────────────────
     st.subheader("🧠 Addestra il Tuo Modello")
 
-    # Leggi metadati dell'ultimo training se esiste
     company_path = os.path.join("models", "company_model")
     meta_path    = os.path.join(company_path, "training_meta.json")
     last_meta    = None
@@ -380,7 +352,6 @@ if page == "🗃️ Dataset Builder":
         except Exception:
             pass
 
-    # Stato modello attivo
     if model_source == "company":
         st.success("✅ **Modello aziendale attivo** — l'app sta usando il tuo modello personalizzato.")
     else:
@@ -399,7 +370,6 @@ if page == "🗃️ Dataset Builder":
 
     st.markdown("---")
 
-    # Parametri training
     cur_stats = builder.stats()
     n_legit    = cur_stats["legitimate"]
     n_phishing = cur_stats["phishing"]
@@ -523,7 +493,6 @@ else:
             if rep.get("lastReportedAt"):
                 st.caption(f"**Ultima segnalazione:** {rep['lastReportedAt'][:10]}")
 
-            # Metodo lookup (solo per domini)
             method = rep.get("lookup_method", "")
             if method == "dns-fallback" and rep.get("resolved_ip"):
                 st.caption(f"ℹ️ Lookup eseguito sull'IP risolto: `{rep['resolved_ip']}`")
@@ -537,55 +506,55 @@ else:
         else:
             st.warning(f"⚠️ {rep['message']}")
 
-     
-def _render_virustotal(vt: dict):
-    """
-    Widget riutilizzabile per mostrare il risultato di un lookup VirusTotal
-    su un hash file. Gestisce tutti gli stati: malicious, suspicious, clean,
-    not_found, skipped, error.
-    """
-    status = vt["status"]
- 
-    if status == "malicious":
-        st.error(
-            f"🔴 **MALEVOLO** — {vt['detection_ratio']} engine lo segnalano"
-            + (f" come `{vt['threat_label']}`" if vt.get("threat_label") else "")
-        )
-    elif status == "suspicious":
-        st.warning(
-            f"🟠 **SOSPETTO** — {vt['detection_ratio']} engine lo segnalano come sospetto"
-            + (f" (`{vt['threat_label']}`)" if vt.get("threat_label") else "")
-        )
-    elif status == "clean":
-        st.success(f"✅ **PULITO** — 0 / {vt['total_engines']} engine lo segnalano")
-    elif status == "not_found":
-        st.info("🔵 **Non trovato su VirusTotal** — file mai sottomesso o molto recente")
-        st.caption("⚠️ 'Non trovato' non significa necessariamente pulito.")
-    elif status == "skipped":
-        st.info(f"ℹ️ {vt['message']}")
-        return
-    else:  # error
-        st.warning(f"⚠️ {vt['message']}")
-        return
- 
-    # Metriche dettagliate (solo se VT ha risposto con dati)
-    if status in ("malicious", "suspicious", "clean"):
-        mc1, mc2, mc3 = st.columns(3)
-        mc1.metric("🔴 Malevoli",  vt["malicious"])
-        mc2.metric("🟠 Sospetti",  vt["suspicious"])
-        mc3.metric("✅ Puliti",    vt["undetected"])
- 
-        if vt.get("file_type"):
-            st.caption(f"**Tipo file (VT):** {vt['file_type']}")
-        if vt.get("file_name"):
-            st.caption(f"**Nome originale (VT):** {vt['file_name']}")
-        if vt.get("first_submission"):
-            st.caption(f"**Prima sottomissione:** {vt['first_submission']}")
-        if vt.get("last_analysis"):
-            st.caption(f"**Ultima analisi:** {vt['last_analysis']}")
- 
-    st.markdown(f"[🔗 Apri report completo su VirusTotal]({vt['permalink']})")
- 
+    def _render_virustotal(vt: dict):
+        """
+        Widget riutilizzabile per mostrare il risultato di un lookup VirusTotal
+        su un hash file. Gestisce tutti gli stati: malicious, suspicious, clean,
+        not_found, skipped, error.
+        """
+        status = vt["status"]
+
+        if status == "malicious":
+            st.error(
+                f"🔴 **MALEVOLO** — {vt['detection_ratio']} engine lo segnalano"
+                + (f" come `{vt['threat_label']}`" if vt.get("threat_label") else "")
+            )
+        elif status == "suspicious":
+            st.warning(
+                f"🟠 **SOSPETTO** — {vt['detection_ratio']} engine lo segnalano come sospetto"
+                + (f" (`{vt['threat_label']}`)" if vt.get("threat_label") else "")
+            )
+        elif status == "clean":
+            st.success(f"✅ **PULITO** — 0 / {vt['total_engines']} engine lo segnalano")
+        elif status == "not_found":
+            st.info("🔵 **Non trovato su VirusTotal** — file mai sottomesso o molto recente")
+            st.caption("⚠️ 'Non trovato' non significa necessariamente pulito.")
+        elif status == "skipped":
+            st.info(f"ℹ️ {vt['message']}")
+            return
+        else:  # error
+            st.warning(f"⚠️ {vt['message']}")
+            return
+
+        # Metriche dettagliate (solo se VT ha risposto con dati)
+        if status in ("malicious", "suspicious", "clean"):
+            mc1, mc2, mc3 = st.columns(3)
+            mc1.metric("🔴 Malevoli",  vt["malicious"])
+            mc2.metric("🟠 Sospetti",  vt["suspicious"])
+            mc3.metric("✅ Puliti",    vt["undetected"])
+
+            if vt.get("file_type"):
+                st.caption(f"**Tipo file (VT):** {vt['file_type']}")
+            if vt.get("file_name"):
+                st.caption(f"**Nome originale (VT):** {vt['file_name']}")
+            if vt.get("first_submission"):
+                st.caption(f"**Prima sottomissione:** {vt['first_submission']}")
+            if vt.get("last_analysis"):
+                st.caption(f"**Ultima analisi:** {vt['last_analysis']}")
+
+        st.markdown(f"[🔗 Apri report completo su VirusTotal]({vt['permalink']})")
+
+
     # ── results panel ──────────────────────────────────────────────────────────
 
     with col_results:
@@ -595,10 +564,10 @@ def _render_virustotal(vt: dict):
             st.info("In attesa di un file `.eml` per avviare il triage.")
         else:
             try:
-                # ── 1. DEEP HEADER ANALYSIS (new SOC analyzer) ─────────────────
+                # ── 1. DEEP HEADER ANALYSIS ────────────────────────────────
                 soc = analyzer.analyze(temp_path)
 
-                # ── 1a. Envelope / identità ────────────────────────────────────
+                # ── 1a. Envelope / identità ────────────────────────────────
                 with st.expander("📬 Envelope & Identità", expanded=True):
                     cols = st.columns(2)
                     with cols[0]:
@@ -613,13 +582,11 @@ def _render_virustotal(vt: dict):
                         st.markdown(f"**MIME-Version:** `{soc['mime_version'] or '—'}`")
 
                     st.markdown("---")
-                    rp_ok = soc["return_path"] and soc["from_"]
                     st.markdown(f"**Return-Path:** `{soc['return_path'] or '—'}`")
                     st.markdown(f"**Errors-To:** `{soc['errors_to'] or '—'}`")
 
-                    #Nuovo codice (Fix con controllo Reply-To assente):
                     if not soc.get("reply_to"):
-                                        reply_icon = "⚪ Assente"
+                        reply_icon = "⚪ Assente"
                     else:
                         reply_icon = "🔴 MISMATCH" if soc["reply_to_mismatch"] else "✅ Coerente"
                     st.markdown(
@@ -632,7 +599,6 @@ def _render_virustotal(vt: dict):
                             "Indicatore tipico di phishing/harvesting."
                         )
 
-                    # ── Return-Path domain mismatch ───────────────────────────────────────
                     if soc.get("return_path_domain_mismatch"):
                         st.error(
                             f"🔴 **Return-Path Mismatch** — dominio `{soc['return_path_domain']}` "
@@ -642,7 +608,6 @@ def _render_virustotal(vt: dict):
                     elif soc.get("return_path"):
                         st.success("✅ Return-Path coerente con il dominio From")
 
-                    # ── Display Name Spoofing ─────────────────────────────────────────────
                     dns_embedded = soc.get("display_name_spoofing")
                     if dns_embedded:
                         st.error(
@@ -656,8 +621,7 @@ def _render_virustotal(vt: dict):
                     st.markdown("---")
                     st.markdown("**🔎 Reputazione Domini Mittente (AbuseIPDB)**")
 
-                    # Raccoglie i domini unici da controllare: From, Return-Path, Reply-To
-                    _domains_to_check: dict[str, str] = {}   # label → domain
+                    _domains_to_check: dict[str, str] = {}
                     import re as _re
 
                     def _pull_domain(raw: str | None) -> str:
@@ -686,7 +650,7 @@ def _render_virustotal(vt: dict):
                                     _dom_rep = validator.check_domain_reputation(_dom)
                                 _render_abuseipdb(_dom_rep, label=_lbl)
 
-                # ── 1b. Catena Received ────────────────────────────────────────
+                # ── 1b. Catena Received ────────────────────────────────────
                 with st.expander("📡 Catena Received (routing hop-by-hop)"):
                     hops = soc["received_hops"]
                     if not hops:
@@ -718,14 +682,10 @@ def _render_virustotal(vt: dict):
                             if hop.get("for_address"):
                                 st.markdown(f"For: `{hop['for_address']}`")
 
-                            # ── AbuseIPDB — tutti gli IPv4 dell'header ────────────
-                            # all_ips contiene TUTTI gli indirizzi trovati nell'header
-                            # (sender, by, ecc.), deduplicati in ordine di apparizione.
                             all_ips = hop.get("all_ips") or (
                                 [hop["sender_ip"]] if hop.get("sender_ip") else []
                             )
                             for _ip in all_ips:
-                                # Determina se è il sender o l'host ricevente
                                 if _ip == hop.get("sender_ip"):
                                     _ip_role = "Sender"
                                 else:
@@ -739,22 +699,17 @@ def _render_virustotal(vt: dict):
                                 st.code(hop["raw"], language="text")
                             st.markdown("---")
 
-                # ── 1c. Autenticazione ─────────────────────────────────────────
+                # ── 1c. Autenticazione ─────────────────────────────────────
                 with st.expander("🔑 Autenticazione (SPF / DKIM / DMARC)", expanded=True):
 
-                    # ── Run live validation ────────────────────────────────────
-                    # SPF: evaluated against the injection-server IP + Return-Path
-                    # (NOT the From header — that would be trivially spoofable).
                     spf_live = validator.check_spf(
                         sender_ip  = soc.get("injection_sender_ip") or "",
                         mail_from  = soc.get("return_path") or soc.get("from_") or "",
                         helo_domain= (soc.get("injection_server") or {}).get("from_host") or "",
                     )
 
-                    # DKIM: cryptographic verification from the raw .eml bytes
                     dkim_live = validator.check_dkim(soc.get("raw_eml_bytes") or b"")
 
-                    # DMARC: policy + alignment, fed the live SPF/DKIM results
                     dmarc_live = validator.check_dmarc(
                         from_address = soc.get("from_") or "",
                         spf_result   = spf_live["status"],
@@ -762,14 +717,10 @@ def _render_virustotal(vt: dict):
                         dkim_results = dkim_live.get("signatures") or [],
                     )
 
-                    # ── Header-based results (from receiving MTA) ──────────────
-                    # Keep these for cross-reference — they reflect what the
-                    # receiving server recorded at delivery time.
                     auth_header = soc["auth_results"] or soc["arc_auth_results"]
 
                     col_spf, col_dkim, col_dmarc = st.columns(3)
 
-                    # ── SPF column ─────────────────────────────────────────────
                     with col_spf:
                         st.markdown("#### SPF")
                         status = spf_live["status"]
@@ -795,14 +746,12 @@ def _render_virustotal(vt: dict):
                             with st.expander("Received-SPF (header MTA)"):
                                 st.code(soc["received_spf_raw"], language="text")
 
-                        # Cross-reference with Authentication-Results header
                         spf_header = auth_header.get("SPF")
                         if spf_header:
                             match = spf_header["status"] == status
                             icon = "✅" if match else "⚠️ diverge"
                             st.caption(f"Authentication-Results header: `{spf_header['status']}` {icon}")
 
-                    # ── DKIM column ────────────────────────────────────────────
                     with col_dkim:
                         st.markdown("#### DKIM")
                         dkim_status = dkim_live["status"]
@@ -818,7 +767,6 @@ def _render_virustotal(vt: dict):
                         st.caption(f"Libreria: `{dkim_live.get('library')}`")
                         st.caption(dkim_live.get("message", ""))
 
-                        # Per-signature breakdown
                         for sig in dkim_live.get("signatures") or []:
                             sig_ok = sig["result"] == "pass"
                             label  = f"Firma #{sig['index']+1} — `{sig.get('d_domain','?')}` s=`{sig.get('selector','?')}`"
@@ -829,14 +777,12 @@ def _render_virustotal(vt: dict):
                             st.caption(f"DNS key record: `{sig.get('dns_key_record','')}`")
                             st.caption(sig.get("message",""))
 
-                        # Cross-reference
                         dkim_header = auth_header.get("DKIM")
                         if dkim_header:
                             match = dkim_header["status"] == dkim_status
                             icon  = "✅" if match else "⚠️ diverge"
                             st.caption(f"Authentication-Results header: `{dkim_header['status']}` {icon}")
 
-                    # ── DMARC column ───────────────────────────────────────────
                     with col_dmarc:
                         st.markdown("#### DMARC")
                         dmarc_status = dmarc_live["status"]
@@ -861,14 +807,12 @@ def _render_virustotal(vt: dict):
                         if dmarc_live.get("rua"):
                             st.caption(f"RUA: `{dmarc_live['rua']}`")
 
-                        # Cross-reference
                         dmarc_header = auth_header.get("DMARC")
                         if dmarc_header:
                             match = dmarc_header["status"] in ("pass","bestguesspass") and dmarc_status == "pass"
                             icon  = "✅" if match else "⚠️ diverge"
                             st.caption(f"Authentication-Results header: `{dmarc_header['status']}` {icon}")
 
-                    # ── Alignment summary ──────────────────────────────────────
                     st.markdown("---")
                     st.markdown("**Riepilogo allineamento DMARC**")
                     c1, c2 = st.columns(2)
@@ -891,7 +835,6 @@ def _render_virustotal(vt: dict):
                     else:
                         c2.markdown("Nessuna firma DKIM da verificare per l'allineamento")
 
-                    # ── ARC ────────────────────────────────────────────────────
                     if soc["arc_seal"]:
                         st.markdown("---")
                         st.markdown("**ARC Headers (intermediary signing)**")
@@ -904,7 +847,7 @@ def _render_virustotal(vt: dict):
                             with st.expander("ARC-Authentication-Results"):
                                 st.code(soc["arc_authentication_results"], language="text")
 
-                # ── 1d. Allegati ───────────────────────────────────────────────
+                # ── 1d. Allegati ───────────────────────────────────────────
                 attachments = soc.get("attachments", [])
                 with st.expander(f"📎 Allegati ({len(attachments)} trovati)"):
                     if not attachments:
@@ -937,46 +880,45 @@ def _render_virustotal(vt: dict):
                         else:
                             st.warning("⚠️ Impossibile verificare la coerenza (dati insufficienti)")
 
-                        # ── Hash & threat intel links ──────────────────────────
-                sha256 = att.get("hash_sha256")
-                if sha256:
-                    st.markdown("**🔐 Hash crittografici**")
-                    hc1, hc2, hc3 = st.columns(3)
-                    hc1.caption("MD5")
-                    hc1.code(att["hash_md5"],  language="text")
-                    hc2.caption("SHA-1")
-                    hc2.code(att["hash_sha1"], language="text")
-                    hc3.caption("SHA-256")
-                    hc3.code(sha256,           language="text")
-        
-                    # ── VirusTotal lookup automatico ───────────────────────────────
-                    st.markdown("**🛡️ VirusTotal — Threat Intelligence**")
-                    with st.spinner(f"Interrogazione VirusTotal per `{sha256[:16]}…`"):
-                        vt_result = validator.check_file_hash(sha256)
-                    _render_virustotal(vt_result)
-        
-                    # ── Link manuali (fallback / analisi approfondita) ─────────────
-                    with st.expander("🔍 Altri servizi threat intelligence"):
-                        lc1, lc2 = st.columns(2)
-                        lc1.markdown(
-                            f"[🧪 Any.run](https://app.any.run/tasks/#{sha256})"
-                        )
-                        lc2.markdown(
-                            f"[🦅 Hybrid Analysis](https://www.hybrid-analysis.com/search?query={sha256})"
-                        )
-                        st.caption(
-                            "⚠️ Prima di caricare un allegato su servizi online, "
-                            "verifica che non contenga dati riservati o PII."
-                        )
-        
+                        # ── Hash & VirusTotal lookup automatico ────────────
+                        sha256 = att.get("hash_sha256")
+                        if sha256:
+                            st.markdown("**🔐 Hash crittografici**")
+                            hc1, hc2, hc3 = st.columns(3)
+                            hc1.caption("MD5")
+                            hc1.code(att["hash_md5"],  language="text")
+                            hc2.caption("SHA-1")
+                            hc2.code(att["hash_sha1"], language="text")
+                            hc3.caption("SHA-256")
+                            hc3.code(sha256,           language="text")
+
+                            # ── VirusTotal lookup automatico ───────────────
+                            st.markdown("**🛡️ VirusTotal — Threat Intelligence**")
+                            with st.spinner(f"Interrogazione VirusTotal per `{sha256[:16]}…`"):
+                                vt_result = validator.check_file_hash(sha256)
+                            _render_virustotal(vt_result)
+
+                            # ── Link manuali (analisi approfondita) ────────
+                            with st.expander("🔍 Altri servizi threat intelligence"):
+                                lc1, lc2 = st.columns(2)
+                                lc1.markdown(
+                                    f"[🧪 Any.run](https://app.any.run/tasks/#{sha256})"
+                                )
+                                lc2.markdown(
+                                    f"[🦅 Hybrid Analysis](https://www.hybrid-analysis.com/search?query={sha256})"
+                                )
+                                st.caption(
+                                    "⚠️ Prima di caricare un allegato su servizi online, "
+                                    "verifica che non contenga dati riservati o PII."
+                                )
+
                         st.markdown("---")
 
-                # ── 1e. Corpo testo ────────────────────────────────────────────
+                # ── 1e. Corpo testo ────────────────────────────────────────
                 with st.expander("📄 Corpo Email (testo estratto)"):
                     body_source = soc.get("body_source", "unknown")
                     strip_applied = soc.get("html_strip_applied", False)
 
-                    # Badge sorgente
                     if body_source == "text/plain":
                         st.caption("📝 Sorgente: `text/plain` — nessuno stripping necessario")
                     elif body_source == "text/html":
@@ -985,7 +927,6 @@ def _render_virustotal(vt: dict):
                         st.caption("⚠️ Corpo email non rilevato")
 
                     if strip_applied:
-                        # Mostra entrambe le versioni per permettere confronto
                         tab_clean, tab_raw = st.tabs(["✅ Testo pulito (input BERT)", "🔍 HTML grezzo originale"])
                         with tab_clean:
                             st.text_area(
@@ -998,7 +939,7 @@ def _render_virustotal(vt: dict):
                     else:
                         st.text_area("Body:", soc.get("body_clean") or soc["body"] or "(vuoto)", height=220)
 
-                # ── 1f. Flags SOC summary ──────────────────────────────────────
+                # ── 1f. Flags SOC summary ──────────────────────────────────
                 st.subheader("🚨 Riepilogo Flags SOC")
                 flags = soc.get("flags", [])
                 if not flags:
@@ -1018,16 +959,13 @@ def _render_virustotal(vt: dict):
 
                 st.divider()
 
-                # ── 2. REAL AI CONTENT ANALYSIS (BERT integration) ────────────
+                # ── 2. AI CONTENT ANALYSIS (BERT) ─────────────────────────
                 st.subheader("🤖 Analisi Contenuto con Intelligenza Artificiale (BERT)")
                 if model_source == "company":
                     st.success("🏢 Modello **aziendale** attivo — addestrato sulle email della tua organizzazione.")
                 else:
                     st.info("🌐 Modello **base** attivo (Kaggle-BERT). Popola il dataset e addestra il tuo modello personalizzato nel Dataset Builder.")
 
-                # Usa body_clean (testo senza tag HTML) come input per BERT.
-                # Se il corpo era HTML grezzo, body_clean contiene il testo dopo
-                # stripping; se era già text/plain, body_clean è identico al body.
                 clean_body = soc.get("body_clean") or soc.get("body") or ""
                 email_text = f"Subject: {soc['subject'] or ''}\n\n{clean_body}".strip()
 
@@ -1038,34 +976,28 @@ def _render_virustotal(vt: dict):
                     st.warning("⚠️ Impossibile eseguire la classificazione: l'email non contiene testo significativo nel corpo o nell'oggetto.")
                 else:
                     with st.spinner("Messa a punto dei token... BERT sta analizzando il testo..."):
-                        # Tokenizzazione (Tronca se supera i 512 token standard di BERT)
                         inputs = tokenizer(
-                            email_text, 
-                            return_tensors="pt", 
-                            truncation=True, 
+                            email_text,
+                            return_tensors="pt",
+                            truncation=True,
                             max_length=512
                         )
 
-                        # Esegui l'inferenza senza calcolare i gradienti (più veloce)
                         with torch.no_grad():
                             outputs = model(**inputs)
                             logits = outputs.logits
-                            # Calcola le probabilità con Softmax
                             probabilities = torch.softmax(logits, dim=1).flatten().tolist()
 
-                        # Assumiamo la mappatura classica del tuo dataset: Index 0 = Safe, Index 1 = Phishing
-                        # (Se nel tuo addestramento l'ordine è invertito, basta invertire gli indici qui sotto!)
-                        prob_safe = probabilities[0] * 100
+                        prob_safe     = probabilities[0] * 100
                         prob_phishing = probabilities[1] * 100
 
-                        # Renderizza i risultati grafici a seconda della classificazione
                         if prob_phishing > prob_safe:
                             st.error(f"🚨 **Risultato IA: RILEVATO POSSIBILE PHISHING**")
                             st.progress(int(prob_phishing))
                             st.write(f"**Confidenza del Modello:** {prob_phishing:.2f}% Probability Phishing")
                         else:
                             st.success(f"🟢 **Risultato IA: EMAIL LEGITTIMA**")
-                            st.progress(int(prob_phishing)) # La barra si riempie in base alla pericolosità
+                            st.progress(int(prob_phishing))
                             st.write(f"**Confidenza del Modello:** {prob_safe:.2f}% Probability Legitimate")
 
                         with st.expander("Vedi metriche grezze dei logit"):
@@ -1075,7 +1007,7 @@ def _render_virustotal(vt: dict):
                                 "Probabilità Phishing": f"{prob_phishing:.4f}%"
                             })
 
-                # ── cleanup ────────────────────────────────────────────────────
+                # ── cleanup ────────────────────────────────────────────────
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
 

@@ -18,3 +18,4 @@ torchvision
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
 bs4
+pyspf
