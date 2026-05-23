@@ -1,16 +1,3 @@
-"""
-validators.py — Real SPF / DKIM / DMARC / AbuseIPDB / VirusTotal validation
-
-Dependencies (add to requirements.txt):
-    dnspython>=2.4.0
-    pyspf>=2.0.14
-    dkimpy>=1.1.4
-    python-dotenv>=1.0.0
-
-Install:
-    pip install dnspython pyspf dkimpy python-dotenv
-"""
-
 import re
 import json
 import socket
@@ -20,42 +7,28 @@ import urllib.error
 import dns.resolver
 from typing import Optional
 
-# ── Carica .env se presente (priorità su st.secrets) ──────────────────────
-import os as _os
-try:
-    from dotenv import load_dotenv as _load_dotenv
-    _load_dotenv(override=False)
-except ImportError:
-    pass  # python-dotenv opzionale
+# Config centralizzata: risolve .env in locale, st.secrets su Streamlit Cloud.
+# Nessun import di streamlit qui — validators.py rimane usabile in script standalone.
+from src.config import ABUSEIPDB_API_KEY, VIRUSTOTAL_API_KEY
 
-import streamlit as st
-
-def _get_secret(key: str, default: str = "") -> str:
-    """Legge prima da variabili d'ambiente (.env), poi da st.secrets."""
-    return _os.environ.get(key) or st.secrets.get(key, default)
-
-# ── AbuseIPDB ──────────────────────────────────────────────────────────────
-ABUSEIPDB_API_KEY  = _get_secret("ABUSEIPDB_API_KEY")
-ABUSEIPDB_ENDPOINT = "https://api.abuseipdb.com/api/v2/check"
-
-# ── VirusTotal ─────────────────────────────────────────────────────────────
-VIRUSTOTAL_API_KEY  = _get_secret("VIRUSTOTAL_API_KEY")
+# ── Endpoint ───────────────────────────────────────────────────────────────
+ABUSEIPDB_ENDPOINT  = "https://api.abuseipdb.com/api/v2/check"
 VIRUSTOTAL_ENDPOINT = "https://www.virustotal.com/api/v3/files"
 
 # ── optional imports with graceful fallback ────────────────────────────────
 try:
-    import spf as pyspf          # pyspf
+    import spf as pyspf
     _SPF_AVAILABLE = True
 except ImportError:
     _SPF_AVAILABLE = False
 
 try:
-    import dkim                  # dkimpy
+    import dkim
     _DKIM_AVAILABLE = True
 except ImportError:
     _DKIM_AVAILABLE = False
 
-
+# Il resto del file (helpers, EmailSecurityValidator, ecc.) rimane invariato.
 # ── helpers ────────────────────────────────────────────────────────────────
 
 def _extract_address(raw: Optional[str]) -> Optional[str]:
