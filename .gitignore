@@ -3,3 +3,7 @@ models/saved_models/
 data/raw/
 __pycache__/
 .streamlit/secrets.toml
+data/raw/custom_legitimate/
+data/raw/custom_phishing/
+data/custom_dataset.csv
+.streamlit/secrets.toml
