@@ -19,7 +19,8 @@ import dns.resolver
 from typing import Optional
 
 # ── AbuseIPDB ──────────────────────────────────────────────────────────────
-ABUSEIPDB_API_KEY = "98e4849d6e66962f7532d9f72e6e9ecb032f27bae61643e31037dc643460e17a224c473333c544a5"
+import streamlit as st
+ABUSEIPDB_API_KEY = st.secrets.get("ABUSEIPDB_API_KEY", "")
 ABUSEIPDB_ENDPOINT = "https://api.abuseipdb.com/api/v2/check"
 
 # ── optional imports with graceful fallback ────────────────────────────────

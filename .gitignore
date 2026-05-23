@@ -2,3 +2,4 @@
 models/saved_models/
 data/raw/
 __pycache__/
+.streamlit/secrets.toml
