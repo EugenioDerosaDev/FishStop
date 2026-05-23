@@ -391,7 +391,7 @@ if page == "🗃️ Dataset Builder":
             st.success("✅ Dataset pronto per il training.")
     #scommenta per abilitare il bottone 
     #can_train = n_legit >= 20 and n_phishing >= 20
-    can_train = False;
+    can_train = False
     if st.button("🚀 Avvia Training", type="primary",
                  disabled=not can_train,
                  width="stretch"):
@@ -505,6 +505,57 @@ else:
             st.info(f"ℹ️ {rep['message']}")
         else:
             st.warning(f"⚠️ {rep['message']}")
+
+    def _render_geo(geo: dict):
+        """
+        Widget compatto per la geolocalizzazione IP (ip-api.com).
+        Mostra paese/città/timezone/ASN e badge per proxy/hosting.
+        Progettato per essere chiamato inline nella card di ogni hop Received.
+        """
+        if geo["status"] == "skipped":
+            st.caption(f"🌍 Geo: {geo['message']}")
+            return
+        if geo["status"] == "error":
+            st.caption(f"🌍 Geo non disponibile: {geo['message']}")
+            return
+
+        # ── Riga principale: bandiera + città + paese ────────────────────
+        flag = ""
+        cc   = geo.get("country_code", "")
+        if cc:
+            # Converte codice paese in emoji bandiera (Unicode Regional Indicator)
+            try:
+                flag = "".join(chr(0x1F1E6 + ord(c) - ord("A")) for c in cc.upper()) + " "
+            except Exception:
+                flag = ""
+
+        location_parts = [p for p in [geo.get("city"), geo.get("region"), geo.get("country")] if p]
+        location_str   = ", ".join(location_parts) if location_parts else "—"
+
+        badges = []
+        if geo.get("is_proxy"):
+            badges.append("⚠️ **Proxy/VPN**")
+        if geo.get("is_hosting"):
+            badges.append("☁️ **Datacenter/Hosting**")
+        badge_str = "  " + "  ".join(badges) if badges else ""
+
+        st.markdown(f"🌍 {flag}**{location_str}**{badge_str}")
+
+        # ── Riga dettagli: timezone / ISP / ASN ─────────────────────────
+        details = []
+        if geo.get("timezone"):
+            details.append(f"🕐 `{geo['timezone']}`")
+        if geo.get("isp"):
+            details.append(f"ISP: `{geo['isp']}`")
+        if geo.get("asn"):
+            details.append(f"AS: `{geo['asn']}`")
+        if details:
+            st.caption("  ·  ".join(details))
+
+        # ── Link Google Maps (coordinate disponibili) ────────────────────
+        if geo.get("lat") and geo.get("lon"):
+            maps_url = f"https://maps.google.com/?q={geo['lat']},{geo['lon']}"
+            st.caption(f"[📍 Apri su Maps]({maps_url})  ·  lat {geo['lat']:.4f}, lon {geo['lon']:.4f}")
 
     def _render_virustotal(vt: dict):
         """
@@ -690,7 +741,14 @@ else:
                                     _ip_role = "Sender"
                                 else:
                                     _ip_role = "By (ricevente)"
-                                with st.expander(f"🔍 Reputazione IP `{_ip}` ({_ip_role})"):
+
+                                # ── Geo inline: mostrata direttamente senza click ──
+                                with st.spinner(f"Geolocalizzazione {_ip}…"):
+                                    _geo = validator.geolocate_ip(_ip)
+                                _render_geo(_geo)
+
+                                # ── Reputazione AbuseIPDB (collassata) ────────────
+                                with st.expander(f"🔍 Reputazione AbuseIPDB `{_ip}` ({_ip_role})"):
                                     with st.spinner(f"Interrogazione AbuseIPDB per {_ip}…"):
                                         ip_rep = validator.check_ip_reputation(_ip)
                                     _render_abuseipdb(ip_rep)
@@ -913,6 +971,76 @@ else:
                                 )
 
                         st.markdown("---")
+
+
+                # ── 1e-bis. Link & Lookalike Domains ──────────────────────
+                links            = soc.get("links", [])
+                lookalike_alerts = soc.get("lookalike_alerts", [])
+                n_links     = len(links)
+                n_lookalike = len(lookalike_alerts)
+                _exp_label = f"🔗 Link & Lookalike Domains ({n_links} link"
+                if n_lookalike:
+                    _exp_label += f", ⚠️ {n_lookalike} sospetti)"
+                else:
+                    _exp_label += ", nessun sospetto)"
+                with st.expander(_exp_label, expanded=bool(n_lookalike)):
+                    if not links:
+                        st.info("Nessun URL trovato nel corpo dell'email.")
+                    else:
+                        # ── Lookalike alerts (mostrati per prima, in evidenza) ──
+                        if lookalike_alerts:
+                            st.markdown("#### ⚠️ Lookalike / Typosquatting Alerts")
+                            for la in lookalike_alerts:
+                                technique_icon = {
+                                    "edit_distance": "✏️",
+                                    "homoglyph":     "🔤",
+                                    "typosquatting": "🔀",
+                                }.get(la["technique"], "⚠️")
+                                technique_name = {
+                                    "edit_distance": "Edit-distance",
+                                    "homoglyph":     "Omoglifi Unicode",
+                                    "typosquatting": "Typosquatting",
+                                }.get(la["technique"], la["technique"])
+                                st.error(
+                                    f"{technique_icon} **{technique_name}** — "
+                                    f"`{la['host']}` assomiglia a **{la['matched_brand']}**"
+                                    + (f" (distanza edit: {la['edit_distance']})" if la.get("edit_distance") else "")
+                                )
+                                st.caption(f"🔍 Dettaglio: {la['detail']}")
+                                st.caption(f"🌐 URL completo: `{la['url']}`")
+                                st.markdown("---")
+                        else:
+                            st.success("✅ Nessun dominio lookalike / typosquatting rilevato.")
+
+                        # ── Tabella di tutti i link ────────────────────────
+                        st.markdown("#### 🔗 Tutti i link estratti")
+
+                        _src_icon = {
+                            "html_href":   "🖇️ `<a href>`",
+                            "html_text":   "📄 testo HTML",
+                            "plain_text":  "📝 testo plain",
+                        }
+
+                        for lnk in links:
+                            _ip_badge = " 🔴 **IP diretto**" if lnk["is_ip"] else ""
+                            _la_match = any(a["host"] == lnk["host"] for a in lookalike_alerts)
+                            _la_badge = " ⚠️ **lookalike**" if _la_match else ""
+                            _scheme_badge = (
+                                " 🔓" if lnk["scheme"] == "http" else
+                                " 🔒" if lnk["scheme"] == "https" else ""
+                            )
+                            _header = f"{_src_icon.get(lnk['source'], lnk['source'])}{_scheme_badge} `{lnk['host']}`{_ip_badge}{_la_badge}"
+                            with st.container(border=False):
+                                lc1, lc2 = st.columns([3, 1])
+                                with lc1:
+                                    st.markdown(f"**{_header}**")
+                                    st.caption(f"`{lnk['url'][:120]}`" + ("…" if len(lnk["url"]) > 120 else ""))
+                                with lc2:
+                                    st.markdown(
+                                        f"[🔍 VT](https://www.virustotal.com/gui/domain/{lnk['host']})"
+                                        f" · [🌐 WHOIS](https://www.whois.com/whois/{lnk['host']})"
+                                    )
+                            st.divider()
 
                 # ── 1e. Corpo testo ────────────────────────────────────────
                 with st.expander("📄 Corpo Email (testo estratto)"):

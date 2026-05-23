@@ -15,6 +15,14 @@ from src.config import ABUSEIPDB_API_KEY, VIRUSTOTAL_API_KEY
 ABUSEIPDB_ENDPOINT  = "https://api.abuseipdb.com/api/v2/check"
 VIRUSTOTAL_ENDPOINT = "https://www.virustotal.com/api/v3/files"
 
+# ip-api.com: free tier, no API key, max 45 req/min (HTTP).
+# Campi richiesti esplicitamente per minimizzare la risposta JSON.
+_IPAPI_FIELDS = (
+    "status,message,country,countryCode,regionName,city,"
+    "zip,lat,lon,timezone,isp,org,as,proxy,hosting,query"
+)
+IPAPI_ENDPOINT = "http://ip-api.com/json/{ip}?fields=" + _IPAPI_FIELDS
+
 # ── optional imports with graceful fallback ────────────────────────────────
 try:
     import spf as pyspf
@@ -762,6 +770,105 @@ class EmailSecurityValidator:
             "first_submission": first_sub,
             "last_analysis":    last_anal,
             "message":          " — ".join(message_parts),
+        }
+
+
+    # ── Geolocalizzazione IP (ip-api.com, free, no key) ─────────────────────
+
+    def geolocate_ip(self, ip: str) -> dict:
+        """
+        Geolocalizza un indirizzo IP tramite ip-api.com (free, no API key).
+
+        Restituisce un dict uniforme con tutti i campi geografici rilevanti
+        per il contesto SOC. In caso di errore o IP privato/riservato restituisce
+        status="skipped" o status="error" senza sollevare eccezioni.
+
+        Limiti ip-api.com free tier:
+          - 45 richieste/minuto per IP sorgente (sufficiente per triage interattivo)
+          - Solo HTTP (non HTTPS sul free tier)
+          - Non supporta RFC 1918 / loopback / multicast → status="skipped"
+
+        Returns
+        -------
+        {
+          "status"      : "ok" | "skipped" | "error",
+          "ip"          : str,
+          "country"     : str,   # es. "Italy"
+          "country_code": str,   # es. "IT"
+          "region"      : str,   # es. "Emilia-Romagna"
+          "city"        : str,   # es. "Bologna"
+          "zip"         : str,
+          "lat"         : float | None,
+          "lon"         : float | None,
+          "timezone"    : str,   # es. "Europe/Rome"
+          "isp"         : str,
+          "org"         : str,
+          "asn"         : str,   # es. "AS15169 Google LLC"
+          "is_proxy"    : bool,
+          "is_hosting"  : bool,  # datacenter / VPS / CDN
+          "message"     : str,
+        }
+        """
+        base = {
+            "ip": ip, "country": "", "country_code": "", "region": "",
+            "city": "", "zip": "", "lat": None, "lon": None,
+            "timezone": "", "isp": "", "org": "", "asn": "",
+            "is_proxy": False, "is_hosting": False,
+        }
+
+        if not ip:
+            return {**base, "status": "skipped", "message": "Nessun IP fornito"}
+
+        # Salta indirizzi privati / loopback / link-local senza chiamata HTTP
+        _private = (
+            ip.startswith("10.") or ip.startswith("192.168.") or
+            ip.startswith("127.") or ip.startswith("169.254.") or
+            ip == "::1" or
+            any(ip.startswith(f"172.{n}.") for n in range(16, 32))
+        )
+        if _private:
+            return {**base, "status": "skipped",
+                    "message": f"`{ip}` è un indirizzo privato/riservato — nessuna geo disponibile"}
+
+        url = IPAPI_ENDPOINT.format(ip=ip)
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "FishStop/1.0"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            return {**base, "status": "error",
+                    "message": f"ip-api.com HTTP {exc.code}: {exc.reason}"}
+        except Exception as exc:
+            return {**base, "status": "error",
+                    "message": f"Errore ip-api.com: {exc}"}
+
+        if data.get("status") != "success":
+            # ip-api restituisce status="fail" per IP riservati o input non validi
+            return {**base, "status": "skipped",
+                    "message": f"ip-api.com: {data.get('message', 'risposta non valida')} per `{ip}`"}
+
+        return {
+            "status":       "ok",
+            "ip":           data.get("query", ip),
+            "country":      data.get("country", ""),
+            "country_code": data.get("countryCode", ""),
+            "region":       data.get("regionName", ""),
+            "city":         data.get("city", ""),
+            "zip":          data.get("zip", ""),
+            "lat":          data.get("lat"),
+            "lon":          data.get("lon"),
+            "timezone":     data.get("timezone", ""),
+            "isp":          data.get("isp", ""),
+            "org":          data.get("org", ""),
+            "asn":          data.get("as", ""),
+            "is_proxy":     bool(data.get("proxy")),
+            "is_hosting":   bool(data.get("hosting")),
+            "message":      (
+                f"{data.get('city','')}, {data.get('regionName','')}, "
+                f"{data.get('country','')} ({data.get('countryCode','')})"
+                + (" — ⚠️ Proxy/VPN rilevato" if data.get("proxy") else "")
+                + (" — ☁️ Datacenter/Hosting" if data.get("hosting") else "")
+            ),
         }
 
 
