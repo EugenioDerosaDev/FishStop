@@ -407,7 +407,13 @@ def _strip_html(html: str) -> str:
 # ---------------------------------------------------------------------------
 # Received chain parser
 # ---------------------------------------------------------------------------
-_IP_RE = re.compile(r"\[(\d{1,3}(?:\.\d{1,3}){3})\]")
+# Riconosce sia IPv4 sia IPv6, rimuovendo eventuali parentesi quadre o tonde di contorno
+_IP_RE = re.compile(
+    r"(?:\[|(?<=\s\())"                         # Parentesi quadra o tonda aperta con spazio prima
+    r"([0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){1,7}|(?:::[0-9a-fA-F]{1,4}){1,7}|[0-9a-fA-F]{1,4}::|" # IPv6 standard/compresso
+    r"\d{1,3}(?:\.\d{1,3}){3})"                 # IPv4 classico
+    r"(?=\s*\)|\])"                             # Chiusura parentesi tonda o quadra
+)
 _BY_RE = re.compile(r"by\s+([\w.\-]+)", re.IGNORECASE)
 _FROM_RE = re.compile(r"from\s+([\w.\-]+)\s*(?:\(([^)]*)\))?", re.IGNORECASE)
 _FOR_RE = re.compile(r"for\s+<([^>]+)>", re.IGNORECASE)
@@ -417,31 +423,45 @@ _TLS_RE = re.compile(r"version=(TLS[\w.]+)\s+cipher=([\w\-]+)", re.IGNORECASE)
 def _parse_received_hop(raw: str) -> dict:
     hop: dict = {"raw": raw.strip()}
 
-    m = _FROM_RE.search(raw)
+    # Applica una pulizia iniziale per normalizzare i ritorni a capo e gli spazi multipli
+    clean_raw = " ".join(raw.split())
+
+    m = _FROM_RE.search(clean_raw)
     if m:
         hop["from_host"] = m.group(1)
         parenthetical = m.group(2) or ""
-        ip_m = _IP_RE.search(parenthetical) or _IP_RE.search(raw)
+        
+        # Primo tentativo: cerca l'IP all'interno delle parentesi del campo FROM
+        ip_m = _IP_RE.search(parenthetical)
+        if not ip_m:
+            # Secondo tentativo: se non è nelle parentesi, cercalo subito dopo il nome host
+            # Molto comune nei log Exchange: from host.com (IP) by...
+            host_end = m.end(1)
+            ip_m = _IP_RE.search(clean_raw, host_end)
+        
         hop["sender_ip"] = ip_m.group(1) if ip_m else None
-        parts = [p.strip() for p in parenthetical.replace("[", "").replace("]", "").split()]
-        hop["sender_domain"] = parts[0] if parts and not parts[0][0].isdigit() else None
+        
+        parts = [p.strip() for p in parenthetical.replace("[", "").replace("]", "").replace("(", "").replace(")", "").split()]
+        hop["sender_domain"] = parts[0] if parts and not parts[0][0].isdigit() and ":" not in parts[0] else None
 
-    m2 = _BY_RE.search(raw)
+    # Se non è stato trovato un From strutturato ma è presente un IP, lo estraiamo comunque come paracadute
+    if not hop.get("sender_ip"):
+        fallback_ip = _IP_RE.search(clean_raw)
+        hop["sender_ip"] = fallback_ip.group(1) if fallback_ip else None
+
+    m2 = _BY_RE.search(clean_raw)
     hop["by_host"] = m2.group(1) if m2 else None
 
-    m3 = _FOR_RE.search(raw)
+    m3 = _FOR_RE.search(clean_raw)
     hop["for_address"] = m3.group(1) if m3 else None
 
-    m4 = _TLS_RE.search(raw)
+    m4 = _TLS_RE.search(clean_raw)
     if m4:
         hop["tls_version"] = m4.group(1)
         hop["tls_cipher"]  = m4.group(2)
 
-    # Raccoglie TUTTI gli IPv4 presenti nell'header (non solo il sender_ip).
-    # Un header Received può contenere più indirizzi, es.:
-    #   from mail.evil.com ([1.2.3.4]) by mx.google.com ([5.6.7.8])
-    # Deduplicati mantenendo l'ordine di apparizione.
-    hop["all_ips"] = list(dict.fromkeys(_IP_RE.findall(raw)))
+    # Raccoglie tutti gli IP univoci presenti nell'header usando la nuova regex
+    hop["all_ips"] = list(dict.fromkeys(_IP_RE.findall(clean_raw)))
 
     return hop
 
