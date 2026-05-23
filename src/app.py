@@ -117,6 +117,24 @@ with col_results:
                         "Indicatore tipico di phishing/harvesting."
                     )
 
+                # ── Return-Path domain mismatch ───────────────────────────────────────
+                if soc.get("return_path_domain_mismatch"):
+                    st.error(
+                        f"🔴 **Return-Path Mismatch** — dominio `{soc['return_path_domain']}` "
+                        f"≠ dominio From `{soc['from_']}`. "
+                        "I bounce vengono recapitati a un dominio diverso dal mittente dichiarato."
+                    )
+                elif soc.get("return_path"):
+                    st.success("✅ Return-Path coerente con il dominio From")
+
+                # ── Display Name Spoofing ─────────────────────────────────────────────
+                dns_embedded = soc.get("display_name_spoofing")
+                if dns_embedded:
+                    st.error(
+                        f"🔴 **Display Name Spoofing rilevato** — il Display Name contiene "
+                        f"`{dns_embedded}` ma il mittente reale è `{soc['from_']}`. "
+                        "I client di posta mostrano l'indirizzo nel nome, non quello reale."
+                    )
                 st.markdown(f"**Content-Type:** `{soc['content_type'] or '—'}`")
 
             # ── 1b. Catena Received ────────────────────────────────────────
@@ -339,6 +357,10 @@ with col_results:
                     c5.markdown(
                         f"**Formato rilevato (magic):** `{att['magic_detected_format'] or '—'}`"
                     )
+                    if att.get("size_bytes") is not None:
+                        sz = att["size_bytes"]
+                        sz_str = f"{sz:,} B" if sz < 1024 else f"{sz/1024:.1f} KB" if sz < 1_048_576 else f"{sz/1_048_576:.2f} MB"
+                        st.caption(f"📦 Dimensione: **{sz_str}**")
 
                     match_ok = att.get("extension_match")
                     if match_ok is True:
@@ -347,6 +369,33 @@ with col_results:
                         st.error(f"🔴 Anomalia: {att['anomaly']}")
                     else:
                         st.warning("⚠️ Impossibile verificare la coerenza (dati insufficienti)")
+
+                    # ── Hash & threat intel links ──────────────────────────
+                    sha256 = att.get("hash_sha256")
+                    if sha256:
+                        st.markdown("**🔐 Hash crittografici**")
+                        hc1, hc2, hc3 = st.columns(3)
+                        hc1.code(f"MD5\n{att['hash_md5']}", language="text")
+                        hc2.code(f"SHA-1\n{att['hash_sha1']}", language="text")
+                        hc3.code(f"SHA-256\n{sha256}", language="text")
+
+                        st.markdown("**🔍 Verifica su servizi threat intelligence**")
+                        lc1, lc2, lc3 = st.columns(3)
+                        lc1.markdown(
+                            f"[![VirusTotal](https://img.shields.io/badge/VirusTotal-394EFF?style=for-the-badge&logo=virustotal&logoColor=white)]"
+                            f"(https://www.virustotal.com/gui/file/{sha256})",
+                            unsafe_allow_html=True,
+                        )
+                        lc2.markdown(
+                            f"[🔬 Any.run](https://app.any.run/tasks/#{sha256})",
+                        )
+                        lc3.markdown(
+                            f"[🦅 Hybrid Analysis](https://www.hybrid-analysis.com/search?query={sha256})",
+                        )
+                        st.caption(
+                            "⚠️ Prima di caricare un allegato su servizi online, "
+                            "verifica che non contenga dati riservati o PII."
+                        )
                     st.markdown("---")
 
             # ── 1e. Corpo testo ────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import re
 import base64
+import hashlib
 import email
 from email import policy
 from typing import Optional
@@ -82,6 +83,12 @@ def _ext_from_filename(filename: str) -> Optional[str]:
     if "." in filename:
         return filename.rsplit(".", 1)[-1].lower()
     return None
+
+
+def _extract_domain(email_or_addr: str) -> str:
+    """Return the domain part of an address string, lower-cased."""
+    m = re.search(r"@([\w.\-]+)", email_or_addr or "")
+    return m.group(1).lower() if m else ""
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +257,30 @@ class EmlSOCAnalyzer:
         report["reply_to_mismatch"] = bool(
             reply_addr and from_addr and reply_addr.lower() != from_addr.lower()
         )
+        # Anomaly: Return-Path domain ≠ From domain (server spoofing signal)
+        return_path_addr   = self._extract_address(report["return_path"])
+        return_path_domain = _extract_domain(return_path_addr or "") if return_path_addr else ""
+        from_domain        = _extract_domain(from_addr or "") if from_addr else ""
+        report["return_path_domain_mismatch"] = bool(
+            return_path_domain and from_domain
+            and return_path_domain.lower() != from_domain.lower()
+        )
+        report["return_path_domain"] = return_path_domain
+
+        # Anomaly: Display Name contains an email address (display name spoofing)
+        # e.g. From: "support@paypal.com" <attacker@evil.com>
+        display_name_email_match = None
+        if report["from_"]:
+            # Il display name è tutto ciò che precede < nella stringa From
+            dn_match = re.match(r'^"?([^"<]+)"?\s*<', report["from_"])
+            if dn_match:
+                dn = dn_match.group(1).strip()
+                embedded = re.search(r"[\w.+\-]+@[\w.\-]+", dn)
+                if embedded:
+                    display_name_email_match = embedded.group(0).lower()
+        report["display_name_spoofing"] = display_name_email_match  # None oppure l'indirizzo embedded
+        
+ 
 
         # ------------------------------------------------------------------ #
         # 3. Google / routing metadata
@@ -397,6 +428,10 @@ class EmlSOCAnalyzer:
             "extension_from_filename": _ext_from_filename(filename),
             "extension_match": None,
             "anomaly": None,
+            "hash_md5":    None,
+            "hash_sha1":   None,
+            "hash_sha256": None,
+            "size_bytes":  None,
         }
 
         if encoding == "base64" and raw_payload:
@@ -406,8 +441,12 @@ class EmlSOCAnalyzer:
                 else:
                     raw_bytes = base64.b64decode(raw_payload)
                 first16 = raw_bytes[:16]
-                entry["magic_bytes_hex"]        = first16.hex().upper()
-                entry["magic_detected_format"]  = _identify_magic_bytes(raw_bytes)
+                entry["magic_bytes_hex"]       = first16.hex().upper()
+                entry["magic_detected_format"] = _identify_magic_bytes(raw_bytes)
+                entry["size_bytes"]            = len(raw_bytes)
+                entry["hash_md5"]              = hashlib.md5(raw_bytes).hexdigest()
+                entry["hash_sha1"]             = hashlib.sha1(raw_bytes).hexdigest()
+                entry["hash_sha256"]           = hashlib.sha256(raw_bytes).hexdigest()
             except Exception as exc:
                 entry["anomaly"] = f"Base64 decode error: {exc}"
                 return entry
@@ -475,13 +514,36 @@ class EmlSOCAnalyzer:
         if report["reply_to_mismatch"]:
             flag("HIGH", "Reply-To",
                  f"Reply-To ({report['reply_to']}) differs da From ({report['from_']}) — possibile harvesting")
-
+                # Return-Path domain mismatch (server spoofing / bounce harvesting)
+        if report.get("return_path_domain_mismatch"):
+            _from_domain = _extract_domain(
+                EmlSOCAnalyzer._extract_address(report.get("from_") or "") or ""
+            )
+            flag(
+                "HIGH", "Return-Path",
+                f"Il dominio Return-Path (`{report['return_path_domain']}`) differisce dal "
+                f"dominio From (`{_from_domain}`) — il server che riceverà i bounce "
+                "non è controllato dal mittente dichiarato. Tipico di phishing o BEC."
+            )
+        elif report.get("return_path") and not report.get("return_path_domain"):
+            flag("LOW", "Return-Path", "Return-Path presente ma dominio non estraibile")
         # HTML stripping applicato — segnala che il corpo era HTML puro
         if report.get("html_strip_applied"):
             flag("INFO", "Body",
                  "Corpo email in formato HTML puro: tag rimossi prima dell'analisi AI. "
                  "Possibile offuscamento testuale nascosto nei tag.")
 
+             # Display Name Spoofing
+        dns_val = report.get("display_name_spoofing")
+        if dns_val:
+            flag(
+                "HIGH", "Display Name",
+                f"Il Display Name del campo From contiene un indirizzo email (`{dns_val}`). "
+                "Tecnica classica di Display Name Spoofing: i client di posta mostrano "
+                "l'indirizzo embedded invece del mittente reale."
+            )
+    
+    
         # Injection server anomaly
         inj = report.get("injection_server", {})
         if inj.get("sender_ip"):
