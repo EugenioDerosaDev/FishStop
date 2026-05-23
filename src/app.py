@@ -704,6 +704,26 @@ else:
                             with st.expander(f"🌐 {_lbl}"):
                                 with st.spinner(f"Interrogazione AbuseIPDB per `{_dom}`…"):
                                     _dom_rep = validator.check_domain_reputation(_dom)
+                                
+                                # --- LOGICA DI FALLBACK UNIVERSALE ---
+                                if _dom_rep["status"] == "skipped" and ("non esiste" in _dom_rep.get("message", "") or "NXDOMAIN" in _dom_rep.get("message", "")):
+                                    parts = _dom.split(".")
+                                    
+                                    # Controlliamo se siamo davanti a un'estensione composta (es. .co.uk, .gov.it, .edu.it)
+                                    # Se il penultimo elemento è molto corto (<= 3 lettere), è quasi certamente parte del TLD
+                                    if len(parts) >= 3 and len(parts[-2]) <= 3 and parts[-1] in ["uk", "it", "au", "br", "za", "jp"]:
+                                        _parent_dom = ".".join(parts[-3:]) # Prende gli ultimi 3 blocchi: sito.co.uk
+                                    elif len(parts) > 2:
+                                        _parent_dom = ".".join(parts[-2:]) # Prende gli ultimi 2 blocchi: unibo.it
+                                    else:
+                                        _parent_dom = _dom
+
+                                    if _parent_dom != _dom:
+                                        st.warning(f"⚠️ Il dominio `{_dom}` non è risolvibile. Provo il dominio parent universale: `{_parent_dom}`...")
+                                        with st.spinner(f"Interrogazione AbuseIPDB per il parent `{_parent_dom}`…"):
+                                            _dom_rep = validator.check_domain_reputation(_parent_dom)
+                                # ---------------------------------------------------
+
                                 _render_abuseipdb(_dom_rep, label=_lbl)
 
                 # ── 1b. Catena Received ────────────────────────────────────
