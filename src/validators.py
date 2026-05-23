@@ -1,17 +1,19 @@
 """
-validators.py — Real SPF / DKIM / DMARC validation
+validators.py — Real SPF / DKIM / DMARC / AbuseIPDB / VirusTotal validation
 
 Dependencies (add to requirements.txt):
     dnspython>=2.4.0
     pyspf>=2.0.14
     dkimpy>=1.1.4
+    python-dotenv>=1.0.0
 
 Install:
-    pip install dnspython pyspf dkimpy
+    pip install dnspython pyspf dkimpy python-dotenv
 """
 
 import re
 import json
+import socket
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -22,7 +24,7 @@ from typing import Optional
 import os as _os
 try:
     from dotenv import load_dotenv as _load_dotenv
-    _load_dotenv(override=False)   # non sovrascrive variabili già in env
+    _load_dotenv(override=False)
 except ImportError:
     pass  # python-dotenv opzionale
 
@@ -485,75 +487,31 @@ class EmailSecurityValidator:
 
     # ── AbuseIPDB ─────────────────────────────────────────────────────────
 
-    def check_ip_reputation(self, ip: str) -> dict:
+    # ── AbuseIPDB — metodo privato HTTP ───────────────────────────────────
+
+    def _abuseipdb_call(self, ip: str) -> dict:
         """
-        Interroga l'API AbuseIPDB v2 per ottenere la reputazione di un IP.
-
-        Returns
-        -------
-        {
-          "status"               : "ok" | "skipped" | "error",
-          "ip"                   : str,
-          "abuseConfidenceScore" : int,        # 0–100
-          "totalReports"         : int,
-          "numDistinctUsers"     : int,
-          "countryCode"          : str,
-          "isp"                  : str,
-          "domain"               : str,
-          "isWhitelisted"        : bool,
-          "usageType"            : str,
-          "lastReportedAt"       : str | None,
-          "url"                  : str,        # link diretto alla pagina AbuseIPDB
-          "message"              : str,
-        }
+        Chiamata raw all'API AbuseIPDB v2 per un singolo IP.
+        Restituisce il dict "data" della risposta, o lancia eccezione.
+        Uso interno — usa check_ip_reputation / check_domain_reputation.
         """
-        base = {
-            "ip":                   ip,
-            "abuseConfidenceScore": 0,
-            "totalReports":         0,
-            "numDistinctUsers":     0,
-            "countryCode":          "",
-            "isp":                  "",
-            "domain":               "",
-            "isWhitelisted":        False,
-            "usageType":            "",
-            "lastReportedAt":       None,
-            "url":                  f"https://www.abuseipdb.com/check/{ip}",
-        }
-
-        if not ip:
-            return {**base, "status": "skipped", "message": "Nessun IP fornito"}
-
-        if not ABUSEIPDB_API_KEY:
-            return {**base, "status": "skipped",
-                    "message": "API key AbuseIPDB non configurata — lookup saltato"}
-
         params = urllib.parse.urlencode({"ipAddress": ip, "maxAgeInDays": "90"})
         url    = f"{ABUSEIPDB_ENDPOINT}?{params}"
         req    = urllib.request.Request(
             url,
-            headers={
-                "Key":    ABUSEIPDB_API_KEY,
-                "Accept": "application/json",
-            },
+            headers={"Key": ABUSEIPDB_API_KEY, "Accept": "application/json"},
         )
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            return json.loads(resp.read().decode("utf-8")).get("data", {})
 
-        try:
-            with urllib.request.urlopen(req, timeout=6) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            return {**base, "status": "error",
-                    "message": f"AbuseIPDB HTTP {exc.code}: {exc.reason}"}
-        except Exception as exc:
-            return {**base, "status": "error",
-                    "message": f"Errore AbuseIPDB: {exc}"}
-
-        data = payload.get("data", {})
+    @staticmethod
+    def _format_abuseipdb(data: dict, lookup_key: str) -> dict:
+        """Normalizza il dict 'data' di AbuseIPDB in un risultato uniforme."""
         score = int(data.get("abuseConfidenceScore") or 0)
-
+        ip    = data.get("ipAddress", lookup_key)
         return {
-            **base,
             "status":               "ok",
+            "ip":                   ip,
             "abuseConfidenceScore": score,
             "totalReports":         int(data.get("totalReports") or 0),
             "numDistinctUsers":     int(data.get("numDistinctUsers") or 0),
@@ -563,129 +521,147 @@ class EmailSecurityValidator:
             "isWhitelisted":        bool(data.get("isWhitelisted")),
             "usageType":            data.get("usageType") or "",
             "lastReportedAt":       data.get("lastReportedAt"),
+            "url":                  f"https://www.abuseipdb.com/check/{ip}",
             "message": (
                 f"Score: {score}/100 — {int(data.get('totalReports') or 0)} segnalazioni "
                 f"da {int(data.get('numDistinctUsers') or 0)} utenti distinti"
             ),
         }
 
-    # ── VirusTotal ────────────────────────────────────────────────────────
+    # ── AbuseIPDB — IP ────────────────────────────────────────────────────
 
-    def check_virustotal_hash(self, sha256: str) -> dict:
+    def check_ip_reputation(self, ip: str) -> dict:
         """
-        Interroga l'API VirusTotal v3 per ottenere il report di un file tramite SHA-256.
+        Interroga AbuseIPDB v2 per la reputazione di un indirizzo IP.
 
         Returns
         -------
         {
-          "status"          : "ok" | "not_found" | "skipped" | "error",
-          "sha256"          : str,
-          "malicious"       : int,   # numero di engine che lo segnalano come malevolo
-          "suspicious"      : int,
-          "undetected"      : int,
-          "harmless"        : int,
-          "total"           : int,   # totale engine che hanno risposto
-          "threat_label"    : str,   # etichetta threat (es. "trojan.genericgb/…")
-          "threat_category" : str,
-          "popular_threat"  : str,
-          "first_submission": str | None,
-          "last_analysis"   : str | None,
-          "url"             : str,   # link diretto alla pagina VT
-          "message"         : str,
+          "status"               : "ok" | "skipped" | "error",
+          "ip"                   : str,
+          "abuseConfidenceScore" : int,   # 0–100
+          "totalReports"         : int,
+          "numDistinctUsers"     : int,
+          "countryCode"          : str,
+          "isp"                  : str,
+          "domain"               : str,
+          "isWhitelisted"        : bool,
+          "usageType"            : str,
+          "lastReportedAt"       : str | None,
+          "url"                  : str,
+          "message"              : str,
         }
         """
         base = {
-            "sha256":          sha256,
-            "malicious":       0,
-            "suspicious":      0,
-            "undetected":      0,
-            "harmless":        0,
-            "total":           0,
-            "threat_label":    "",
-            "threat_category": "",
-            "popular_threat":  "",
-            "first_submission": None,
-            "last_analysis":   None,
-            "url":             f"https://www.virustotal.com/gui/file/{sha256}",
+            "ip": ip, "abuseConfidenceScore": 0, "totalReports": 0,
+            "numDistinctUsers": 0, "countryCode": "", "isp": "", "domain": "",
+            "isWhitelisted": False, "usageType": "", "lastReportedAt": None,
+            "url": f"https://www.abuseipdb.com/check/{ip}",
         }
-
-        if not sha256:
-            return {**base, "status": "skipped", "message": "Nessun hash SHA-256 fornito"}
-
-        if not VIRUSTOTAL_API_KEY:
+        if not ip:
+            return {**base, "status": "skipped", "message": "Nessun IP fornito"}
+        if not ABUSEIPDB_API_KEY:
             return {**base, "status": "skipped",
-                    "message": "API key VirusTotal non configurata — lookup saltato"}
-
-        url = f"{VIRUSTOTAL_ENDPOINT}/{sha256}"
-        req = urllib.request.Request(
-            url,
-            headers={
-                "x-apikey": VIRUSTOTAL_API_KEY,
-                "Accept":   "application/json",
-            },
-        )
-
+                    "message": "API key AbuseIPDB non configurata — lookup saltato"}
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
+            data = self._abuseipdb_call(ip)
+            return self._format_abuseipdb(data, ip)
         except urllib.error.HTTPError as exc:
-            if exc.code == 404:
-                return {**base, "status": "not_found",
-                        "message": "Hash non trovato nel database VirusTotal — file mai analizzato o molto recente"}
             return {**base, "status": "error",
-                    "message": f"VirusTotal HTTP {exc.code}: {exc.reason}"}
+                    "message": f"AbuseIPDB HTTP {exc.code}: {exc.reason}"}
         except Exception as exc:
             return {**base, "status": "error",
-                    "message": f"Errore VirusTotal: {exc}"}
+                    "message": f"Errore AbuseIPDB: {exc}"}
 
-        attrs  = payload.get("data", {}).get("attributes", {})
-        stats  = attrs.get("last_analysis_stats", {})
-        malicious   = int(stats.get("malicious",   0))
-        suspicious  = int(stats.get("suspicious",  0))
-        undetected  = int(stats.get("undetected",  0))
-        harmless    = int(stats.get("harmless",    0))
-        total       = malicious + suspicious + undetected + harmless
+    # ── AbuseIPDB — Dominio ───────────────────────────────────────────────
 
-        # Threat classification
-        pop_threat   = attrs.get("popular_threat_classification", {})
-        threat_label = pop_threat.get("suggested_threat_label", "")
-        threat_cat   = ""
-        if pop_threat.get("popular_threat_category"):
-            threat_cat = pop_threat["popular_threat_category"][0].get("value", "")
-        popular_name = ""
-        if pop_threat.get("popular_threat_name"):
-            popular_name = pop_threat["popular_threat_name"][0].get("value", "")
+    def check_domain_reputation(self, domain: str) -> dict:
+        """
+        Controlla la reputazione di un dominio su AbuseIPDB.
 
-        # Timestamps
-        import datetime as _dt
-        def _ts(epoch):
-            if not epoch:
-                return None
-            return _dt.datetime.fromtimestamp(int(epoch), tz=_dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        Strategia a due livelli:
+          1. Prova il dominio direttamente tramite l'endpoint /check
+             (AbuseIPDB accetta hostname oltre agli IP).
+          2. Se fallisce o non restituisce dati utili, risolve il dominio
+             in IP via DNS e ripete il lookup sull'IP.
 
-        first_sub    = _ts(attrs.get("first_submission_date"))
-        last_analysis= _ts(attrs.get("last_analysis_date"))
-
-        if malicious > 0 or suspicious > 0:
-            msg = f"⚠️ Rilevato da {malicious} engine ({suspicious} sospetti) su {total} totali"
-        else:
-            msg = f"✅ Nessuna rilevazione su {total} engine"
-
-        return {
-            **base,
-            "status":           "ok",
-            "malicious":        malicious,
-            "suspicious":       suspicious,
-            "undetected":       undetected,
-            "harmless":         harmless,
-            "total":            total,
-            "threat_label":     threat_label,
-            "threat_category":  threat_cat,
-            "popular_threat":   popular_name,
-            "first_submission": first_sub,
-            "last_analysis":    last_analysis,
-            "message":          msg,
+        Returns
+        -------
+        Stessa struttura di check_ip_reputation, più:
+          "domain_queried"   : str   — dominio originale passato in input
+          "resolved_ip"      : str   — IP risolto (se il fallback DNS è stato usato)
+          "lookup_method"    : "direct" | "dns-fallback" | "skipped" | "error"
+        """
+        base = {
+            "domain_queried":      domain,
+            "resolved_ip":         "",
+            "lookup_method":       "error",
+            "ip":                  "",
+            "abuseConfidenceScore": 0,
+            "totalReports":        0,
+            "numDistinctUsers":    0,
+            "countryCode":         "",
+            "isp":                 "",
+            "domain":              "",
+            "isWhitelisted":       False,
+            "usageType":           "",
+            "lastReportedAt":      None,
+            "url":                 f"https://www.abuseipdb.com/check/{domain}",
+            "message":             "",
         }
+
+        if not domain:
+            return {**base, "status": "skipped",
+                    "lookup_method": "skipped",
+                    "message": "Nessun dominio fornito"}
+        if not ABUSEIPDB_API_KEY:
+            return {**base, "status": "skipped",
+                    "lookup_method": "skipped",
+                    "message": "API key AbuseIPDB non configurata — lookup saltato"}
+
+        # ── 1. Tentativo diretto con il dominio ───────────────────────────
+        try:
+            data = self._abuseipdb_call(domain)
+            if data:
+                result = self._format_abuseipdb(data, domain)
+                result["domain_queried"] = domain
+                result["resolved_ip"]    = data.get("ipAddress", "")
+                result["lookup_method"]  = "direct"
+                return result
+        except urllib.error.HTTPError as exc:
+            # 422 = AbuseIPDB non accetta questo hostname come IP → tentiamo DNS
+            if exc.code not in (422, 400):
+                return {**base, "status": "error",
+                        "message": f"AbuseIPDB HTTP {exc.code}: {exc.reason}"}
+        except Exception:
+            pass  # qualsiasi altro errore → proviamo il fallback DNS
+
+        # ── 2. Fallback: risoluzione DNS → lookup sull'IP ─────────────────
+        resolved_ip = ""
+        try:
+            resolved_ip = socket.gethostbyname(domain)
+        except Exception as exc:
+            return {**base, "status": "error",
+                    "lookup_method": "dns-fallback",
+                    "message": f"Impossibile risolvere il dominio `{domain}` in IP: {exc}"}
+
+        try:
+            data = self._abuseipdb_call(resolved_ip)
+            result = self._format_abuseipdb(data, resolved_ip)
+            result["domain_queried"] = domain
+            result["resolved_ip"]    = resolved_ip
+            result["lookup_method"]  = "dns-fallback"
+            return result
+        except urllib.error.HTTPError as exc:
+            return {**base, "status": "error",
+                    "lookup_method": "dns-fallback",
+                    "resolved_ip": resolved_ip,
+                    "message": f"AbuseIPDB HTTP {exc.code} (IP {resolved_ip}): {exc.reason}"}
+        except Exception as exc:
+            return {**base, "status": "error",
+                    "lookup_method": "dns-fallback",
+                    "resolved_ip": resolved_ip,
+                    "message": f"Errore AbuseIPDB (IP {resolved_ip}): {exc}"}
 
 
 # ── smoke test ─────────────────────────────────────────────────────────────

@@ -185,6 +185,12 @@ def _parse_received_hop(raw: str) -> dict:
         hop["tls_version"] = m4.group(1)
         hop["tls_cipher"]  = m4.group(2)
 
+    # Raccoglie TUTTI gli IPv4 presenti nell'header (non solo il sender_ip).
+    # Un header Received può contenere più indirizzi, es.:
+    #   from mail.evil.com ([1.2.3.4]) by mx.google.com ([5.6.7.8])
+    # Deduplicati mantenendo l'ordine di apparizione.
+    hop["all_ips"] = list(dict.fromkeys(_IP_RE.findall(raw)))
+
     return hop
 
 
@@ -223,7 +229,7 @@ class EmlSOCAnalyzer:
         with open(eml_path, "rb") as f:
             raw_bytes = f.read()
 
-        msg = email.message_from_bytes(raw_bytes, policy=policy.compat32)
+        msg = email.message_from_bytes(raw_bytes, policy=policy.default)
 
         report: dict = {}
 

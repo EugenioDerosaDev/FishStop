@@ -17,7 +17,6 @@ HF_MODEL_ID = "eugenioderodev/fishstop-bert"
 
 # ── backend ────────────────────────────────────────────────────────────────
 @st.cache_resource
-@st.cache_resource
 def init_backend():
     parser    = EmailParserPipeline()
     validator = EmailSecurityValidator()
@@ -489,9 +488,54 @@ else:
         colors = {"HIGH": "🔴", "MEDIUM": "🟠", "LOW": "🟡", "INFO": "🔵"}
         return colors.get(level, "⚪")
 
-
     def _status_icon(ok: bool) -> str:
         return "✅" if ok else "❌"
+
+    def _render_abuseipdb(rep: dict, label: str = ""):
+        """
+        Widget riutilizzabile per mostrare il risultato di un lookup AbuseIPDB
+        (IP o dominio). Gestisce tutti gli stati: ok, skipped, error.
+        """
+        if rep["status"] == "ok":
+            score = rep["abuseConfidenceScore"]
+            if rep.get("isWhitelisted"):
+                st.success("✅ **Whitelisted** — provider noto e affidabile")
+            elif score == 0:
+                st.success(f"✅ **Score: {score}/100** — nessuna segnalazione")
+            elif score < 25:
+                st.info(f"🟡 **Score: {score}/100** — basso rischio")
+            elif score < 75:
+                st.warning(f"🟠 **Score: {score}/100** — rischio moderato")
+            else:
+                st.error(f"🔴 **Score: {score}/100** — alto rischio!")
+
+            rc1, rc2, rc3 = st.columns(3)
+            rc1.metric("Segnalazioni",    rep["totalReports"])
+            rc2.metric("Utenti distinti", rep["numDistinctUsers"])
+            rc3.metric("Paese",           rep["countryCode"] or "—")
+
+            if rep.get("isp"):
+                st.caption(f"**ISP:** {rep['isp']}")
+            if rep.get("domain"):
+                st.caption(f"**Dominio ISP:** {rep['domain']}")
+            if rep.get("usageType"):
+                st.caption(f"**Tipo utilizzo:** {rep['usageType']}")
+            if rep.get("lastReportedAt"):
+                st.caption(f"**Ultima segnalazione:** {rep['lastReportedAt'][:10]}")
+
+            # Metodo lookup (solo per domini)
+            method = rep.get("lookup_method", "")
+            if method == "dns-fallback" and rep.get("resolved_ip"):
+                st.caption(f"ℹ️ Lookup eseguito sull'IP risolto: `{rep['resolved_ip']}`")
+            elif method == "direct":
+                st.caption("ℹ️ Lookup eseguito direttamente sul dominio")
+
+            st.markdown(f"[🔗 Apri su AbuseIPDB]({rep['url']})")
+
+        elif rep["status"] == "skipped":
+            st.info(f"ℹ️ {rep['message']}")
+        else:
+            st.warning(f"⚠️ {rep['message']}")
 
 
     # ── results panel ──────────────────────────────────────────────────────────
@@ -560,6 +604,40 @@ else:
                         )
                     st.markdown(f"**Content-Type:** `{soc['content_type'] or '—'}`")
 
+                    # ── Reputazione domini mittente (AbuseIPDB) ───────────────
+                    st.markdown("---")
+                    st.markdown("**🔎 Reputazione Domini Mittente (AbuseIPDB)**")
+
+                    # Raccoglie i domini unici da controllare: From, Return-Path, Reply-To
+                    _domains_to_check: dict[str, str] = {}   # label → domain
+                    import re as _re
+
+                    def _pull_domain(raw: str | None) -> str:
+                        if not raw:
+                            return ""
+                        m = _re.search(r"@([\w.\-]+)", raw)
+                        return m.group(1).lower() if m else ""
+
+                    _from_domain = _pull_domain(soc.get("from_"))
+                    _rp_domain   = _pull_domain(soc.get("return_path"))
+                    _rt_domain   = _pull_domain(soc.get("reply_to"))
+
+                    if _from_domain:
+                        _domains_to_check[f"From (`{_from_domain}`)"] = _from_domain
+                    if _rp_domain and _rp_domain != _from_domain:
+                        _domains_to_check[f"Return-Path (`{_rp_domain}`)"] = _rp_domain
+                    if _rt_domain and _rt_domain not in (_from_domain, _rp_domain):
+                        _domains_to_check[f"Reply-To (`{_rt_domain}`)"] = _rt_domain
+
+                    if not _domains_to_check:
+                        st.info("Nessun dominio mittente estraibile dagli header.")
+                    else:
+                        for _lbl, _dom in _domains_to_check.items():
+                            with st.expander(f"🌐 {_lbl}"):
+                                with st.spinner(f"Interrogazione AbuseIPDB per `{_dom}`…"):
+                                    _dom_rep = validator.check_domain_reputation(_dom)
+                                _render_abuseipdb(_dom_rep, label=_lbl)
+
                 # ── 1b. Catena Received ────────────────────────────────────────
                 with st.expander("📡 Catena Received (routing hop-by-hop)"):
                     hops = soc["received_hops"]
@@ -592,47 +670,22 @@ else:
                             if hop.get("for_address"):
                                 st.markdown(f"For: `{hop['for_address']}`")
 
-                            # ── AbuseIPDB reputation lookup ────────────────────
-                            sender_ip = hop.get("sender_ip")
-                            if sender_ip:
-                                with st.expander(f"🔍 Reputazione IP: `{sender_ip}`"):
-                                    with st.spinner(f"Interrogazione AbuseIPDB per {sender_ip}…"):
-                                        ip_rep = validator.check_ip_reputation(sender_ip)
-
-                                    if ip_rep["status"] == "ok":
-                                        score = ip_rep["abuseConfidenceScore"]
-                                        # Colore badge in base allo score
-                                        if ip_rep["isWhitelisted"]:
-                                            st.success(f"✅ **IP Whitelisted** — provider noto e affidabile")
-                                        elif score == 0:
-                                            st.success(f"✅ **Score: {score}/100** — nessuna segnalazione")
-                                        elif score < 25:
-                                            st.info(f"🟡 **Score: {score}/100** — basso rischio")
-                                        elif score < 75:
-                                            st.warning(f"🟠 **Score: {score}/100** — rischio moderato")
-                                        else:
-                                            st.error(f"🔴 **Score: {score}/100** — IP ad alto rischio!")
-
-                                        rep_c1, rep_c2, rep_c3 = st.columns(3)
-                                        rep_c1.metric("Segnalazioni totali", ip_rep["totalReports"])
-                                        rep_c2.metric("Utenti distinti",     ip_rep["numDistinctUsers"])
-                                        rep_c3.metric("Paese",               ip_rep["countryCode"] or "—")
-
-                                        if ip_rep["isp"]:
-                                            st.caption(f"**ISP:** {ip_rep['isp']}")
-                                        if ip_rep["domain"]:
-                                            st.caption(f"**Dominio ISP:** {ip_rep['domain']}")
-                                        if ip_rep["usageType"]:
-                                            st.caption(f"**Tipo utilizzo:** {ip_rep['usageType']}")
-                                        if ip_rep["lastReportedAt"]:
-                                            st.caption(f"**Ultima segnalazione:** {ip_rep['lastReportedAt'][:10]}")
-                                        st.markdown(
-                                            f"[🔗 Apri su AbuseIPDB]({ip_rep['url']})",
-                                        )
-                                    elif ip_rep["status"] == "skipped":
-                                        st.info(f"ℹ️ {ip_rep['message']}")
-                                    else:
-                                        st.warning(f"⚠️ {ip_rep['message']}")
+                            # ── AbuseIPDB — tutti gli IPv4 dell'header ────────────
+                            # all_ips contiene TUTTI gli indirizzi trovati nell'header
+                            # (sender, by, ecc.), deduplicati in ordine di apparizione.
+                            all_ips = hop.get("all_ips") or (
+                                [hop["sender_ip"]] if hop.get("sender_ip") else []
+                            )
+                            for _ip in all_ips:
+                                # Determina se è il sender o l'host ricevente
+                                if _ip == hop.get("sender_ip"):
+                                    _ip_role = "Sender"
+                                else:
+                                    _ip_role = "By (ricevente)"
+                                with st.expander(f"🔍 Reputazione IP `{_ip}` ({_ip_role})"):
+                                    with st.spinner(f"Interrogazione AbuseIPDB per {_ip}…"):
+                                        ip_rep = validator.check_ip_reputation(_ip)
+                                    _render_abuseipdb(ip_rep)
 
                             with st.expander("Raw Received header"):
                                 st.code(hop["raw"], language="text")
@@ -848,49 +901,19 @@ else:
                             hc3.caption("SHA-256")
                             hc3.code(sha256, language="text")
 
-                            st.markdown("**🔍 Analisi VirusTotal**")
-                            with st.spinner(f"Interrogazione VirusTotal per `{sha256[:12]}…`"):
-                                vt = validator.check_virustotal_hash(sha256)
-
-                            if vt["status"] == "ok":
-                                mal  = vt["malicious"]
-                                susp = vt["suspicious"]
-                                tot  = vt["total"]
-
-                                if mal == 0 and susp == 0:
-                                    st.success(f"✅ **Nessuna rilevazione** — 0 / {tot} engine")
-                                elif mal <= 3:
-                                    st.warning(f"🟠 **{mal} rilevazioni** ({susp} sospetti) su {tot} engine")
-                                else:
-                                    st.error(f"🔴 **{mal} rilevazioni** ({susp} sospetti) su {tot} engine")
-
-                                vt_c1, vt_c2, vt_c3, vt_c4 = st.columns(4)
-                                vt_c1.metric("🔴 Malevolo",  mal)
-                                vt_c2.metric("🟠 Sospetto",  susp)
-                                vt_c3.metric("✅ Pulito",    vt["harmless"])
-                                vt_c4.metric("⬜ Non scansionato", vt["undetected"])
-
-                                if vt["threat_label"]:
-                                    st.caption(f"**Threat label:** `{vt['threat_label']}`")
-                                if vt["threat_category"]:
-                                    st.caption(f"**Categoria:** `{vt['threat_category']}`")
-                                if vt["popular_threat"]:
-                                    st.caption(f"**Nome comune:** `{vt['popular_threat']}`")
-                                if vt["first_submission"]:
-                                    st.caption(f"**Prima sottomissione:** {vt['first_submission']}")
-                                if vt["last_analysis"]:
-                                    st.caption(f"**Ultima analisi:** {vt['last_analysis']}")
-
-                                st.markdown(f"[🔗 Apri su VirusTotal]({vt['url']})")
-
-                            elif vt["status"] == "not_found":
-                                st.info(f"ℹ️ {vt['message']}")
-                                st.markdown(f"[🔗 Invia per analisi su VirusTotal]({vt['url']})")
-                            elif vt["status"] == "skipped":
-                                st.info(f"ℹ️ {vt['message']}")
-                            else:
-                                st.warning(f"⚠️ {vt['message']}")
-
+                            st.markdown("**🔍 Verifica su servizi threat intelligence**")
+                            lc1, lc2, lc3 = st.columns(3)
+                            lc1.markdown(
+                                f"[![VirusTotal](https://img.shields.io/badge/VirusTotal-394EFF?style=for-the-badge&logo=virustotal&logoColor=white)]"
+                                f"(https://www.virustotal.com/gui/file/{sha256})",
+                                unsafe_allow_html=True,
+                            )
+                            lc2.markdown(
+                                f"[🔬 Any.run](https://app.any.run/tasks/#{sha256})",
+                            )
+                            lc3.markdown(
+                                f"[🦅 Hybrid Analysis](https://www.hybrid-analysis.com/search?query={sha256})",
+                            )
                             st.caption(
                                 "⚠️ Prima di caricare un allegato su servizi online, "
                                 "verifica che non contenga dati riservati o PII."
