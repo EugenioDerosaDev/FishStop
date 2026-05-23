@@ -636,6 +636,188 @@ class EmailSecurityValidator:
                     "resolved_ip": resolved_ip,
                     "message": f"Errore AbuseIPDB (IP {resolved_ip}): {exc}"}
 
+    """
+PATCH per validators.py
+=======================
+Aggiungere i due metodi qui sotto alla classe EmailSecurityValidator,
+subito dopo il metodo check_domain_reputation().
+
+Dipende da:
+  - VIRUSTOTAL_API_KEY già importata da src.config (patch precedente)
+  - urllib già importato nel modulo
+
+Nessuna dipendenza nuova — usa solo la stdlib.
+"""
+
+
+# ── VirusTotal — File Hash ─────────────────────────────────────────────────
+
+def check_file_hash(self, sha256: str) -> dict:
+    """
+    Interroga VirusTotal v3 per la reputazione di un hash SHA-256.
+
+    Flusso:
+      GET /files/{sha256}
+        200 → file noto a VT, restituisce analisi completa
+        404 → file mai sottomesso a VT (non significa che sia pulito)
+        401 → API key non valida
+        429 → rate limit superato (free tier: 4 req/min)
+
+    Returns
+    -------
+    {
+      "status"           : "malicious" | "suspicious" | "clean" |
+                           "unknown"   | "not_found"  |
+                           "skipped"   | "error",
+      "sha256"           : str,
+      "malicious"        : int,   # engine che lo flaggano come malevolo
+      "suspicious"       : int,   # engine che lo flaggano come sospetto
+      "undetected"       : int,   # engine che lo giudicano pulito
+      "total_engines"    : int,   # totale engine che l'hanno analizzato
+      "detection_ratio"  : str,   # es. "3 / 72"
+      "threat_label"     : str,   # etichetta aggregata VT (es. "trojan.agent")
+      "file_type"        : str,   # tipo file rilevato da VT
+      "file_name"        : str,   # nome file originale (se noto a VT)
+      "first_submission" : str,   # data prima sottomissione (ISO)
+      "last_analysis"    : str,   # data ultima analisi (ISO)
+      "permalink"        : str,   # URL diretto al report VT
+      "message"          : str,
+    }
+    """
+    base = {
+        "sha256":           sha256,
+        "malicious":        0,
+        "suspicious":       0,
+        "undetected":       0,
+        "total_engines":    0,
+        "detection_ratio":  "—",
+        "threat_label":     "",
+        "file_type":        "",
+        "file_name":        "",
+        "first_submission": "",
+        "last_analysis":    "",
+        "permalink":        f"https://www.virustotal.com/gui/file/{sha256}",
+    }
+
+    if not sha256:
+        return {**base, "status": "skipped",
+                "message": "Nessun hash fornito"}
+
+    if not VIRUSTOTAL_API_KEY:
+        return {**base, "status": "skipped",
+                "message": "API key VirusTotal non configurata — lookup saltato"}
+
+    url = f"{VIRUSTOTAL_ENDPOINT}/{sha256}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "x-apikey": VIRUSTOTAL_API_KEY,
+            "Accept":   "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return self._format_vt_file(data, base)
+
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return {**base, "status": "not_found",
+                    "message": "Hash non trovato su VirusTotal — file mai sottomesso o molto recente"}
+        if exc.code == 401:
+            return {**base, "status": "error",
+                    "message": "API key VirusTotal non valida (HTTP 401)"}
+        if exc.code == 429:
+            return {**base, "status": "error",
+                    "message": "Rate limit VirusTotal superato (free tier: 4 req/min) — riprova tra poco"}
+        return {**base, "status": "error",
+                "message": f"VirusTotal HTTP {exc.code}: {exc.reason}"}
+    except Exception as exc:
+        return {**base, "status": "error",
+                "message": f"Errore VirusTotal: {exc}"}
+
+
+@staticmethod
+def _format_vt_file(data: dict, base: dict) -> dict:
+    """
+    Normalizza la risposta JSON di VT /files/{hash} in un dict uniforme.
+
+    La risposta VT ha questa struttura:
+      data.attributes.last_analysis_stats  → contatori per categoria
+      data.attributes.popular_threat_classification.suggested_threat_label
+      data.attributes.type_description
+      data.attributes.names[0]
+      data.attributes.first_submission_date  (epoch int)
+      data.attributes.last_analysis_date     (epoch int)
+    """
+    import datetime
+
+    attrs = data.get("data", {}).get("attributes", {})
+    stats = attrs.get("last_analysis_stats", {})
+
+    malicious   = int(stats.get("malicious",   0))
+    suspicious  = int(stats.get("suspicious",  0))
+    undetected  = int(stats.get("undetected",  0))
+    harmless    = int(stats.get("harmless",    0))
+    total       = malicious + suspicious + undetected + harmless
+
+    # Threat label aggregata (es. "trojan.emotet")
+    ptc         = attrs.get("popular_threat_classification") or {}
+    threat_label = ptc.get("suggested_threat_label", "")
+
+    # Tipo file e nome originale
+    file_type = attrs.get("type_description", "")
+    names     = attrs.get("names") or []
+    file_name = names[0] if names else ""
+
+    # Date (epoch → ISO string)
+    def _epoch_to_iso(val) -> str:
+        if not val:
+            return ""
+        try:
+            return datetime.datetime.fromtimestamp(
+                int(val), tz=datetime.timezone.utc
+            ).strftime("%Y-%m-%d %H:%M UTC")
+        except Exception:
+            return str(val)
+
+    first_sub  = _epoch_to_iso(attrs.get("first_submission_date"))
+    last_anal  = _epoch_to_iso(attrs.get("last_analysis_date"))
+
+    # Determina lo status sintetico
+    if malicious > 0:
+        status = "malicious"
+    elif suspicious > 0:
+        status = "suspicious"
+    elif total > 0:
+        status = "clean"
+    else:
+        status = "unknown"
+
+    detection_ratio = f"{malicious + suspicious} / {total}" if total else "0 / 0"
+
+    message_parts = [f"{malicious} engine su {total} lo segnalano come malevolo"]
+    if suspicious:
+        message_parts.append(f"{suspicious} come sospetto")
+    if threat_label:
+        message_parts.append(f"minaccia rilevata: {threat_label}")
+
+    return {
+        **base,
+        "status":           status,
+        "malicious":        malicious,
+        "suspicious":       suspicious,
+        "undetected":       undetected,
+        "total_engines":    total,
+        "detection_ratio":  detection_ratio,
+        "threat_label":     threat_label,
+        "file_type":        file_type,
+        "file_name":        file_name,
+        "first_submission": first_sub,
+        "last_analysis":    last_anal,
+        "message":          " — ".join(message_parts),
+    }
 
 # ── smoke test ─────────────────────────────────────────────────────────────
 

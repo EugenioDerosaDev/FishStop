@@ -121,3 +121,9 @@ ABUSEIPDB_API_KEY=...
 #aggiungere 
 aggiungere modo per integrare altre email nel dataset di addestramento. 
 aggiungere selezione per far si di essere comply con tesseract 
+
+
+
+Link extraction + lookalike domain — altissimo valore, copre una delle tecniche di phishing più comuni
+VirusTotal hash lookup automatico — completa qualcosa già visibile nell'UI
+Geolocalizzazione IP — aggiunge contesto immediato alla catena Received senza dipendenze pesanti (ip-api.com è free)

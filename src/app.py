@@ -537,7 +537,55 @@ else:
         else:
             st.warning(f"⚠️ {rep['message']}")
 
-
+     
+def _render_virustotal(vt: dict):
+    """
+    Widget riutilizzabile per mostrare il risultato di un lookup VirusTotal
+    su un hash file. Gestisce tutti gli stati: malicious, suspicious, clean,
+    not_found, skipped, error.
+    """
+    status = vt["status"]
+ 
+    if status == "malicious":
+        st.error(
+            f"🔴 **MALEVOLO** — {vt['detection_ratio']} engine lo segnalano"
+            + (f" come `{vt['threat_label']}`" if vt.get("threat_label") else "")
+        )
+    elif status == "suspicious":
+        st.warning(
+            f"🟠 **SOSPETTO** — {vt['detection_ratio']} engine lo segnalano come sospetto"
+            + (f" (`{vt['threat_label']}`)" if vt.get("threat_label") else "")
+        )
+    elif status == "clean":
+        st.success(f"✅ **PULITO** — 0 / {vt['total_engines']} engine lo segnalano")
+    elif status == "not_found":
+        st.info("🔵 **Non trovato su VirusTotal** — file mai sottomesso o molto recente")
+        st.caption("⚠️ 'Non trovato' non significa necessariamente pulito.")
+    elif status == "skipped":
+        st.info(f"ℹ️ {vt['message']}")
+        return
+    else:  # error
+        st.warning(f"⚠️ {vt['message']}")
+        return
+ 
+    # Metriche dettagliate (solo se VT ha risposto con dati)
+    if status in ("malicious", "suspicious", "clean"):
+        mc1, mc2, mc3 = st.columns(3)
+        mc1.metric("🔴 Malevoli",  vt["malicious"])
+        mc2.metric("🟠 Sospetti",  vt["suspicious"])
+        mc3.metric("✅ Puliti",    vt["undetected"])
+ 
+        if vt.get("file_type"):
+            st.caption(f"**Tipo file (VT):** {vt['file_type']}")
+        if vt.get("file_name"):
+            st.caption(f"**Nome originale (VT):** {vt['file_name']}")
+        if vt.get("first_submission"):
+            st.caption(f"**Prima sottomissione:** {vt['first_submission']}")
+        if vt.get("last_analysis"):
+            st.caption(f"**Ultima analisi:** {vt['last_analysis']}")
+ 
+    st.markdown(f"[🔗 Apri report completo su VirusTotal]({vt['permalink']})")
+ 
     # ── results panel ──────────────────────────────────────────────────────────
 
     with col_results:
@@ -890,34 +938,37 @@ else:
                             st.warning("⚠️ Impossibile verificare la coerenza (dati insufficienti)")
 
                         # ── Hash & threat intel links ──────────────────────────
-                        sha256 = att.get("hash_sha256")
-                        if sha256:
-                            st.markdown("**🔐 Hash crittografici**")
-                            hc1, hc2, hc3 = st.columns(3)
-                            hc1.caption("MD5")
-                            hc1.code(att['hash_md5'], language="text")
-                            hc2.caption("SHA-1")
-                            hc2.code(att['hash_sha1'], language="text")
-                            hc3.caption("SHA-256")
-                            hc3.code(sha256, language="text")
-
-                            st.markdown("**🔍 Verifica su servizi threat intelligence**")
-                            lc1, lc2, lc3 = st.columns(3)
-                            lc1.markdown(
-                                f"[![VirusTotal](https://img.shields.io/badge/VirusTotal-394EFF?style=for-the-badge&logo=virustotal&logoColor=white)]"
-                                f"(https://www.virustotal.com/gui/file/{sha256})",
-                                unsafe_allow_html=True,
-                            )
-                            lc2.markdown(
-                                f"[🔬 Any.run](https://app.any.run/tasks/#{sha256})",
-                            )
-                            lc3.markdown(
-                                f"[🦅 Hybrid Analysis](https://www.hybrid-analysis.com/search?query={sha256})",
-                            )
-                            st.caption(
-                                "⚠️ Prima di caricare un allegato su servizi online, "
-                                "verifica che non contenga dati riservati o PII."
-                            )
+                sha256 = att.get("hash_sha256")
+                if sha256:
+                    st.markdown("**🔐 Hash crittografici**")
+                    hc1, hc2, hc3 = st.columns(3)
+                    hc1.caption("MD5")
+                    hc1.code(att["hash_md5"],  language="text")
+                    hc2.caption("SHA-1")
+                    hc2.code(att["hash_sha1"], language="text")
+                    hc3.caption("SHA-256")
+                    hc3.code(sha256,           language="text")
+        
+                    # ── VirusTotal lookup automatico ───────────────────────────────
+                    st.markdown("**🛡️ VirusTotal — Threat Intelligence**")
+                    with st.spinner(f"Interrogazione VirusTotal per `{sha256[:16]}…`"):
+                        vt_result = validator.check_file_hash(sha256)
+                    _render_virustotal(vt_result)
+        
+                    # ── Link manuali (fallback / analisi approfondita) ─────────────
+                    with st.expander("🔍 Altri servizi threat intelligence"):
+                        lc1, lc2 = st.columns(2)
+                        lc1.markdown(
+                            f"[🧪 Any.run](https://app.any.run/tasks/#{sha256})"
+                        )
+                        lc2.markdown(
+                            f"[🦅 Hybrid Analysis](https://www.hybrid-analysis.com/search?query={sha256})"
+                        )
+                        st.caption(
+                            "⚠️ Prima di caricare un allegato su servizi online, "
+                            "verifica che non contenga dati riservati o PII."
+                        )
+        
                         st.markdown("---")
 
                 # ── 1e. Corpo testo ────────────────────────────────────────────
