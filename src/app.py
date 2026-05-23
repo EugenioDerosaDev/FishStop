@@ -389,9 +389,9 @@ if page == "🗃️ Dataset Builder":
             st.warning("⚠️ Dataset sbilanciato — considera di aggiungere più email della classe minoritaria.")
         else:
             st.success("✅ Dataset pronto per il training.")
-
-    can_train = n_legit >= 20 and n_phishing >= 20
-
+    #scommenta per abilitare il bottone 
+    #can_train = n_legit >= 20 and n_phishing >= 20
+    can_train = False;
     if st.button("🚀 Avvia Training", type="primary",
                  disabled=not can_train,
                  width="stretch"):
