@@ -848,19 +848,49 @@ else:
                             hc3.caption("SHA-256")
                             hc3.code(sha256, language="text")
 
-                            st.markdown("**🔍 Verifica su servizi threat intelligence**")
-                            lc1, lc2, lc3 = st.columns(3)
-                            lc1.markdown(
-                                f"[![VirusTotal](https://img.shields.io/badge/VirusTotal-394EFF?style=for-the-badge&logo=virustotal&logoColor=white)]"
-                                f"(https://www.virustotal.com/gui/file/{sha256})",
-                                unsafe_allow_html=True,
-                            )
-                            lc2.markdown(
-                                f"[🔬 Any.run](https://app.any.run/tasks/#{sha256})",
-                            )
-                            lc3.markdown(
-                                f"[🦅 Hybrid Analysis](https://www.hybrid-analysis.com/search?query={sha256})",
-                            )
+                            st.markdown("**🔍 Analisi VirusTotal**")
+                            with st.spinner(f"Interrogazione VirusTotal per `{sha256[:12]}…`"):
+                                vt = validator.check_virustotal_hash(sha256)
+
+                            if vt["status"] == "ok":
+                                mal  = vt["malicious"]
+                                susp = vt["suspicious"]
+                                tot  = vt["total"]
+
+                                if mal == 0 and susp == 0:
+                                    st.success(f"✅ **Nessuna rilevazione** — 0 / {tot} engine")
+                                elif mal <= 3:
+                                    st.warning(f"🟠 **{mal} rilevazioni** ({susp} sospetti) su {tot} engine")
+                                else:
+                                    st.error(f"🔴 **{mal} rilevazioni** ({susp} sospetti) su {tot} engine")
+
+                                vt_c1, vt_c2, vt_c3, vt_c4 = st.columns(4)
+                                vt_c1.metric("🔴 Malevolo",  mal)
+                                vt_c2.metric("🟠 Sospetto",  susp)
+                                vt_c3.metric("✅ Pulito",    vt["harmless"])
+                                vt_c4.metric("⬜ Non scansionato", vt["undetected"])
+
+                                if vt["threat_label"]:
+                                    st.caption(f"**Threat label:** `{vt['threat_label']}`")
+                                if vt["threat_category"]:
+                                    st.caption(f"**Categoria:** `{vt['threat_category']}`")
+                                if vt["popular_threat"]:
+                                    st.caption(f"**Nome comune:** `{vt['popular_threat']}`")
+                                if vt["first_submission"]:
+                                    st.caption(f"**Prima sottomissione:** {vt['first_submission']}")
+                                if vt["last_analysis"]:
+                                    st.caption(f"**Ultima analisi:** {vt['last_analysis']}")
+
+                                st.markdown(f"[🔗 Apri su VirusTotal]({vt['url']})")
+
+                            elif vt["status"] == "not_found":
+                                st.info(f"ℹ️ {vt['message']}")
+                                st.markdown(f"[🔗 Invia per analisi su VirusTotal]({vt['url']})")
+                            elif vt["status"] == "skipped":
+                                st.info(f"ℹ️ {vt['message']}")
+                            else:
+                                st.warning(f"⚠️ {vt['message']}")
+
                             st.caption(
                                 "⚠️ Prima di caricare un allegato su servizi online, "
                                 "verifica che non contenga dati riservati o PII."

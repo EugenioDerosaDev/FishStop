@@ -4,9 +4,12 @@ import sys
 # Forza Python a riconoscere la cartella radice per trovare 'src.parser'
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Hardcoding temporaneo delle credenziali per bypassare i problemi del .env
-os.environ["KAGGLE_USERNAME"] = "eugenioderosa"
-os.environ["KAGGLE_KEY"] = "KGAT_8f8c51550b799cda8ed82117f2e37ca2"
+# Carica variabili d'ambiente da .env (Kaggle, API keys, ecc.)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(override=False)
+except ImportError:
+    pass  # python-dotenv opzionale — le variabili devono essere già in env
 
 
 import pandas as pd
@@ -102,18 +105,42 @@ class BERTPhishingTrainer:
 
         # Integrazione email personali
         parser = EmailParserPipeline()
-        df_personal = parser.load_batch_emls(personal_eml_folder)
+        
+        # LOGICA CORRETTA: puntiamo alle sottocartelle dentro data/raw
+        base_raw_folder = "data/raw"
+        personal_legit_folder = os.path.join(base_raw_folder, "custom_legitimate")
+        personal_phish_folder = os.path.join(base_raw_folder, "custom_phishing")
+        
+        df_list = []
+        
+        # 1. Carica le email legittime custom (Label 0)
+        if os.path.exists(personal_legit_folder):
+            df_legit = parser.load_batch_emls(personal_legit_folder)
+            if not df_legit.empty:
+                df_list.append(pd.DataFrame({
+                    'text': df_legit['body'].apply(lambda x: str(x).lower()),
+                    'label': 0
+                }))
+                print(f"[*] Caricate {len(df_legit)} email custom LEGITTIME (Label 0).")
 
-        if not df_personal.empty:
-            print(f"[*] Integrazione attiva: unione di {len(df_personal)} email personali nel pool...")
-            df_personal_aligned = pd.DataFrame({
-                'text': df_personal['body'].apply(lambda x: str(x).lower()),
-                'label': 1
-            })
+        # 2. Carica le email di phishing custom (Label 1)
+        if os.path.exists(personal_phish_folder):
+            df_phish = parser.load_batch_emls(personal_phish_folder)
+            if not df_phish.empty:
+                df_list.append(pd.DataFrame({
+                    'text': df_phish['body'].apply(lambda x: str(x).lower()),
+                    'label': 1
+                }))
+                print(f"[*] Caricate {len(df_phish)} email custom di PHISHING (Label 1).")
+
+        # Unione dei dati custom locali al pool di Kaggle, se presenti
+        if df_list:
+            df_personal_aligned = pd.concat(df_list, ignore_index=True)
             df_personal_aligned.dropna(subset=['text'], inplace=True)
             df_combined = pd.concat([df_kaggle, df_personal_aligned], ignore_index=True)
+            print(f"[*] Integrazione attiva: unione di {len(df_personal_aligned)} email locali totali.")
         else:
-            print("[!] Nessuna email personale rilevata. Si procede solo con Kaggle.")
+            print("[!] Nessuna email trovata in custom_legitimate o custom_phishing. Si procede solo con Kaggle.")
             df_combined = df_kaggle
 
         # ── Integrazione dataset custom (EmlDatasetBuilder) ───────────────
@@ -592,6 +619,7 @@ if __name__ == "__main__":
         target_samples = 6000   # CPU: subset ridotto ma più grande del precedente
 
     try:
+        # Manteniamo il parametro personal_eml_folder intatto come a monte per evitare disallineamenti
         df = trainer_pipeline.download_and_combine_data(
             personal_eml_folder="data/raw/personal_emails",
             sample_size=target_samples

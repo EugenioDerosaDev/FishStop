@@ -18,10 +18,27 @@ import urllib.error
 import dns.resolver
 from typing import Optional
 
-# ── AbuseIPDB ──────────────────────────────────────────────────────────────
+# ── Carica .env se presente (priorità su st.secrets) ──────────────────────
+import os as _os
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv(override=False)   # non sovrascrive variabili già in env
+except ImportError:
+    pass  # python-dotenv opzionale
+
 import streamlit as st
-ABUSEIPDB_API_KEY = st.secrets.get("ABUSEIPDB_API_KEY", "")
+
+def _get_secret(key: str, default: str = "") -> str:
+    """Legge prima da variabili d'ambiente (.env), poi da st.secrets."""
+    return _os.environ.get(key) or st.secrets.get(key, default)
+
+# ── AbuseIPDB ──────────────────────────────────────────────────────────────
+ABUSEIPDB_API_KEY  = _get_secret("ABUSEIPDB_API_KEY")
 ABUSEIPDB_ENDPOINT = "https://api.abuseipdb.com/api/v2/check"
+
+# ── VirusTotal ─────────────────────────────────────────────────────────────
+VIRUSTOTAL_API_KEY  = _get_secret("VIRUSTOTAL_API_KEY")
+VIRUSTOTAL_ENDPOINT = "https://www.virustotal.com/api/v3/files"
 
 # ── optional imports with graceful fallback ────────────────────────────────
 try:
@@ -550,6 +567,124 @@ class EmailSecurityValidator:
                 f"Score: {score}/100 — {int(data.get('totalReports') or 0)} segnalazioni "
                 f"da {int(data.get('numDistinctUsers') or 0)} utenti distinti"
             ),
+        }
+
+    # ── VirusTotal ────────────────────────────────────────────────────────
+
+    def check_virustotal_hash(self, sha256: str) -> dict:
+        """
+        Interroga l'API VirusTotal v3 per ottenere il report di un file tramite SHA-256.
+
+        Returns
+        -------
+        {
+          "status"          : "ok" | "not_found" | "skipped" | "error",
+          "sha256"          : str,
+          "malicious"       : int,   # numero di engine che lo segnalano come malevolo
+          "suspicious"      : int,
+          "undetected"      : int,
+          "harmless"        : int,
+          "total"           : int,   # totale engine che hanno risposto
+          "threat_label"    : str,   # etichetta threat (es. "trojan.genericgb/…")
+          "threat_category" : str,
+          "popular_threat"  : str,
+          "first_submission": str | None,
+          "last_analysis"   : str | None,
+          "url"             : str,   # link diretto alla pagina VT
+          "message"         : str,
+        }
+        """
+        base = {
+            "sha256":          sha256,
+            "malicious":       0,
+            "suspicious":      0,
+            "undetected":      0,
+            "harmless":        0,
+            "total":           0,
+            "threat_label":    "",
+            "threat_category": "",
+            "popular_threat":  "",
+            "first_submission": None,
+            "last_analysis":   None,
+            "url":             f"https://www.virustotal.com/gui/file/{sha256}",
+        }
+
+        if not sha256:
+            return {**base, "status": "skipped", "message": "Nessun hash SHA-256 fornito"}
+
+        if not VIRUSTOTAL_API_KEY:
+            return {**base, "status": "skipped",
+                    "message": "API key VirusTotal non configurata — lookup saltato"}
+
+        url = f"{VIRUSTOTAL_ENDPOINT}/{sha256}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "x-apikey": VIRUSTOTAL_API_KEY,
+                "Accept":   "application/json",
+            },
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return {**base, "status": "not_found",
+                        "message": "Hash non trovato nel database VirusTotal — file mai analizzato o molto recente"}
+            return {**base, "status": "error",
+                    "message": f"VirusTotal HTTP {exc.code}: {exc.reason}"}
+        except Exception as exc:
+            return {**base, "status": "error",
+                    "message": f"Errore VirusTotal: {exc}"}
+
+        attrs  = payload.get("data", {}).get("attributes", {})
+        stats  = attrs.get("last_analysis_stats", {})
+        malicious   = int(stats.get("malicious",   0))
+        suspicious  = int(stats.get("suspicious",  0))
+        undetected  = int(stats.get("undetected",  0))
+        harmless    = int(stats.get("harmless",    0))
+        total       = malicious + suspicious + undetected + harmless
+
+        # Threat classification
+        pop_threat   = attrs.get("popular_threat_classification", {})
+        threat_label = pop_threat.get("suggested_threat_label", "")
+        threat_cat   = ""
+        if pop_threat.get("popular_threat_category"):
+            threat_cat = pop_threat["popular_threat_category"][0].get("value", "")
+        popular_name = ""
+        if pop_threat.get("popular_threat_name"):
+            popular_name = pop_threat["popular_threat_name"][0].get("value", "")
+
+        # Timestamps
+        import datetime as _dt
+        def _ts(epoch):
+            if not epoch:
+                return None
+            return _dt.datetime.fromtimestamp(int(epoch), tz=_dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+        first_sub    = _ts(attrs.get("first_submission_date"))
+        last_analysis= _ts(attrs.get("last_analysis_date"))
+
+        if malicious > 0 or suspicious > 0:
+            msg = f"⚠️ Rilevato da {malicious} engine ({suspicious} sospetti) su {total} totali"
+        else:
+            msg = f"✅ Nessuna rilevazione su {total} engine"
+
+        return {
+            **base,
+            "status":           "ok",
+            "malicious":        malicious,
+            "suspicious":       suspicious,
+            "undetected":       undetected,
+            "harmless":         harmless,
+            "total":            total,
+            "threat_label":     threat_label,
+            "threat_category":  threat_cat,
+            "popular_threat":   popular_name,
+            "first_submission": first_sub,
+            "last_analysis":    last_analysis,
+            "message":          msg,
         }
 
 
