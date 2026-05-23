@@ -11,8 +11,16 @@ Install:
 """
 
 import re
+import json
+import urllib.request
+import urllib.parse
+import urllib.error
 import dns.resolver
 from typing import Optional
+
+# ── AbuseIPDB ──────────────────────────────────────────────────────────────
+ABUSEIPDB_API_KEY = "98e4849d6e66962f7532d9f72e6e9ecb032f27bae61643e31037dc643460e17a224c473333c544a5"
+ABUSEIPDB_ENDPOINT = "https://api.abuseipdb.com/api/v2/check"
 
 # ── optional imports with graceful fallback ────────────────────────────────
 try:
@@ -456,6 +464,92 @@ class EmailSecurityValidator:
             return ".".join(parts[-2:]) if len(parts) >= 2 else d
 
         return org(check_domain) == org(from_domain)
+
+    # ── AbuseIPDB ─────────────────────────────────────────────────────────
+
+    def check_ip_reputation(self, ip: str) -> dict:
+        """
+        Interroga l'API AbuseIPDB v2 per ottenere la reputazione di un IP.
+
+        Returns
+        -------
+        {
+          "status"               : "ok" | "skipped" | "error",
+          "ip"                   : str,
+          "abuseConfidenceScore" : int,        # 0–100
+          "totalReports"         : int,
+          "numDistinctUsers"     : int,
+          "countryCode"          : str,
+          "isp"                  : str,
+          "domain"               : str,
+          "isWhitelisted"        : bool,
+          "usageType"            : str,
+          "lastReportedAt"       : str | None,
+          "url"                  : str,        # link diretto alla pagina AbuseIPDB
+          "message"              : str,
+        }
+        """
+        base = {
+            "ip":                   ip,
+            "abuseConfidenceScore": 0,
+            "totalReports":         0,
+            "numDistinctUsers":     0,
+            "countryCode":          "",
+            "isp":                  "",
+            "domain":               "",
+            "isWhitelisted":        False,
+            "usageType":            "",
+            "lastReportedAt":       None,
+            "url":                  f"https://www.abuseipdb.com/check/{ip}",
+        }
+
+        if not ip:
+            return {**base, "status": "skipped", "message": "Nessun IP fornito"}
+
+        if not ABUSEIPDB_API_KEY:
+            return {**base, "status": "skipped",
+                    "message": "API key AbuseIPDB non configurata — lookup saltato"}
+
+        params = urllib.parse.urlencode({"ipAddress": ip, "maxAgeInDays": "90"})
+        url    = f"{ABUSEIPDB_ENDPOINT}?{params}"
+        req    = urllib.request.Request(
+            url,
+            headers={
+                "Key":    ABUSEIPDB_API_KEY,
+                "Accept": "application/json",
+            },
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            return {**base, "status": "error",
+                    "message": f"AbuseIPDB HTTP {exc.code}: {exc.reason}"}
+        except Exception as exc:
+            return {**base, "status": "error",
+                    "message": f"Errore AbuseIPDB: {exc}"}
+
+        data = payload.get("data", {})
+        score = int(data.get("abuseConfidenceScore") or 0)
+
+        return {
+            **base,
+            "status":               "ok",
+            "abuseConfidenceScore": score,
+            "totalReports":         int(data.get("totalReports") or 0),
+            "numDistinctUsers":     int(data.get("numDistinctUsers") or 0),
+            "countryCode":          data.get("countryCode") or "",
+            "isp":                  data.get("isp") or "",
+            "domain":               data.get("domain") or "",
+            "isWhitelisted":        bool(data.get("isWhitelisted")),
+            "usageType":            data.get("usageType") or "",
+            "lastReportedAt":       data.get("lastReportedAt"),
+            "message": (
+                f"Score: {score}/100 — {int(data.get('totalReports') or 0)} segnalazioni "
+                f"da {int(data.get('numDistinctUsers') or 0)} utenti distinti"
+            ),
+        }
 
 
 # ── smoke test ─────────────────────────────────────────────────────────────

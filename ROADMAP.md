@@ -114,3 +114,10 @@ Da aggiungere come variabili d'ambiente (`.env`):
 VIRUSTOTAL_API_KEY=...
 ABUSEIPDB_API_KEY=...
 ```
+
+
+
+
+#aggiungere 
+aggiungere modo per integrare altre email nel dataset di addestramento. 
+aggiungere selezione per far si di essere comply con tesseract 

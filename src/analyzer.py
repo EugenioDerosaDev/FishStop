@@ -267,18 +267,21 @@ class EmlSOCAnalyzer:
         )
         report["return_path_domain"] = return_path_domain
 
-        # Anomaly: Display Name contains an email address (display name spoofing)
-        # e.g. From: "support@paypal.com" <attacker@evil.com>
+        # Anomaly: Display Name contains an email address DIFFERENT from the actual sender
+        # e.g. From: "support@paypal.com" <attacker@evil.com>  ← spoofing reale
+        #      From: "Mario Rossi mario@example.com" <mario@example.com>  ← stesso indirizzo, non segnalare
         display_name_email_match = None
         if report["from_"]:
-            # Il display name è tutto ciò che precede < nella stringa From
             dn_match = re.match(r'^"?([^"<]+)"?\s*<', report["from_"])
             if dn_match:
                 dn = dn_match.group(1).strip()
                 embedded = re.search(r"[\w.+\-]+@[\w.\-]+", dn)
                 if embedded:
-                    display_name_email_match = embedded.group(0).lower()
-        report["display_name_spoofing"] = display_name_email_match  # None oppure l'indirizzo embedded
+                    embedded_addr = embedded.group(0).lower()
+                    # Segnala solo se l'indirizzo embedded è DIVERSO dal mittente reale
+                    if from_addr and embedded_addr != from_addr.lower():
+                        display_name_email_match = embedded_addr
+        report["display_name_spoofing"] = display_name_email_match  # None oppure l'indirizzo spoofato
         
  
 
