@@ -879,26 +879,30 @@ class EmlSOCAnalyzer:
         """
         Estrae l'IP corretto da usare per la verifica SPF live.
 
-        L'IP giusto è quello che il MX del destinatario ha visto arrivare
-        la connessione SMTP — non un relay interno successivo.
+        L'IP giusto è quello che il primo MX ricevente (più vicino al mittente)
+        ha visto arrivare la connessione SMTP — non un relay interno successivo.
+
         Priorità di estrazione:
 
-        1. client-ip= nel Received-SPF header  ← più affidabile, scritto dal MX
+        1. client-ip= nell'ULTIMO Received-SPF header (più vicino al mittente)
+           ← più affidabile: scritto dal server che ha effettivamente verificato SPF.
+           msg.get() restituisce solo il PRIMO header; serve get_all() + last().
         2. smtp.remote-ip= in Authentication-Results
         3. IP pubblico nell'ultimo hop Received (più vicino al mittente)
         4. Fallback: sender_ip dall'hop [1] (vecchio comportamento)
         """
-        import re
-        ip_re = re.compile(r'(\d{1,3}(?:\.\d{1,3}){3})')
         _private = re.compile(
             r'^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.)'
         )
 
-        # 1. Received-SPF: client-ip=
-        rcvd_spf = str(msg.get('Received-SPF') or '')
-        m = re.search(r'client-ip=([\d.a-fA-F:]+)', rcvd_spf, re.IGNORECASE)
-        if m and not _private.match(m.group(1)):
-            return m.group(1)
+        # 1. Received-SPF: client-ip= — usa l'ULTIMO header (più vicino al mittente)
+        #    get_all() restituisce la lista nell'ordine top→bottom degli header,
+        #    quindi il più vicino al mittente è l'ultimo elemento.
+        all_rcvd_spf = msg.get_all('Received-SPF') or []
+        for rcvd_spf in reversed(all_rcvd_spf):
+            m = re.search(r'client-ip=([\d.a-fA-F:]+)', str(rcvd_spf), re.IGNORECASE)
+            if m and not _private.match(m.group(1)):
+                return m.group(1)
 
         # 2. Authentication-Results: smtp.remote-ip=
         auth = str(msg.get('Authentication-Results') or '')
