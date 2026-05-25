@@ -120,4 +120,7 @@ pip install -r requirements.txt
 
 
 #todo
-test_good_eml anche se pass da error. 
+
+1. test_good_eml anche se pass da error. 
+2. sample_1043 spf error (softfail)
+3. sample_1043 lookalike Falsi positivi, sito corto come t.co sembra altri 
