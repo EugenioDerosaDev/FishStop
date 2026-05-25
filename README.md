@@ -116,3 +116,8 @@ Installa tutto con:
 ```bash
 pip install -r requirements.txt
 ```
+
+
+
+#todo
+test_good_eml anche se pass da error. 
