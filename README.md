@@ -120,7 +120,6 @@ pip install -r requirements.txt
 
 
 #todo
-
-1. test_good_eml anche se pass da error. 
-2. sample_1043 spf error (softfail)
+1. abbassare il rischio dei domini lookalike 
+2. sample_1043 spf error (softfail, da modellare, cosi come permerror ecc. )
 3. sample_1043 lookalike Falsi positivi, sito corto come t.co sembra altri 
