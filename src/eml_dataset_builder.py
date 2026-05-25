@@ -282,7 +282,7 @@ class EmlDatasetBuilder:
         items:             list[tuple[bytes, str, int]],
         overwrite:         bool = False,
         max_file_workers:  int  = 8,
-        progress_callback: callable | None = None,
+        progress_callback: Optional[callable] = None,
     ) -> list[dict]:
         """
         Processa una lista di EML in modo ottimizzato per batch grandi (500-600+).

@@ -587,7 +587,7 @@ class EmlSOCAnalyzer:
         report["closest_to_sender"]    = hops[-1] if hops else {}
 
         # Convenience: IP del server di iniezione (usato dai validator SPF)
-        report["injection_sender_ip"] = (report["injection_server"] or {}).get("sender_ip")
+        report["injection_sender_ip"] = self._extract_spf_sender_ip(msg, hops)
 
         # ------------------------------------------------------------------ #
         # 6. Received-SPF raw line
@@ -873,3 +873,45 @@ class EmlSOCAnalyzer:
             )
 
         return flags
+    
+    @staticmethod
+    def _extract_spf_sender_ip(msg, hops: list) -> str | None:
+        """
+        Estrae l'IP corretto da usare per la verifica SPF live.
+
+        L'IP giusto è quello che il MX del destinatario ha visto arrivare
+        la connessione SMTP — non un relay interno successivo.
+        Priorità di estrazione:
+
+        1. client-ip= nel Received-SPF header  ← più affidabile, scritto dal MX
+        2. smtp.remote-ip= in Authentication-Results
+        3. IP pubblico nell'ultimo hop Received (più vicino al mittente)
+        4. Fallback: sender_ip dall'hop [1] (vecchio comportamento)
+        """
+        import re
+        ip_re = re.compile(r'(\d{1,3}(?:\.\d{1,3}){3})')
+        _private = re.compile(
+            r'^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.)'
+        )
+
+        # 1. Received-SPF: client-ip=
+        rcvd_spf = str(msg.get('Received-SPF') or '')
+        m = re.search(r'client-ip=([\d.a-fA-F:]+)', rcvd_spf, re.IGNORECASE)
+        if m and not _private.match(m.group(1)):
+            return m.group(1)
+
+        # 2. Authentication-Results: smtp.remote-ip=
+        auth = str(msg.get('Authentication-Results') or '')
+        m = re.search(r'smtp\.remote-ip=([\d.]+)', auth, re.IGNORECASE)
+        if m and not _private.match(m.group(1)):
+            return m.group(1)
+
+        # 3. Ultimo hop Received — primo IP pubblico
+        if hops:
+            last_hop = hops[-1]
+            for ip in (last_hop.get('all_ips') or []):
+                if ip and not _private.match(ip):
+                    return ip
+
+        # 4. Fallback legacy: hop [1]
+        return (hops[1].get('sender_ip') if len(hops) > 1 else None)
