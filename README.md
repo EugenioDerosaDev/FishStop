@@ -122,4 +122,5 @@ pip install -r requirements.txt
 #todo
 1. abbassare il rischio dei domini lookalike 
 2. sample_1043 spf error (softfail, da modellare, cosi come permerror ecc. )
-3. sample_1043 lookalike Falsi positivi, sito corto come t.co sembra altri 
+3. sample_1043 lookalike Falsi positivi, sito corto come t.co sembra altri
+4. usare cursor?
