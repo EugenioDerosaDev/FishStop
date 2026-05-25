@@ -1,4 +1,12 @@
 import streamlit as st
+
+# ── DEVE essere la prima chiamata Streamlit ────────────────────────────────
+st.set_page_config(
+    page_title="FishStop - Triage & Phishing Detection",
+    page_icon="🛡️",
+    layout="wide",
+)
+
 import os
 import sys
 import torch
@@ -42,12 +50,6 @@ def init_backend():
 
 parser, validator, analyzer, tokenizer, model, model_source = init_backend()
 
-# ── page config ────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="FishStop - Triage & Phishing Detection",
-    page_icon="🛡️",
-    layout="wide",
-)
 
 st.title("🛡️ FishStop — Analisi & Triage Email")
 st.markdown(
@@ -68,10 +70,11 @@ with st.sidebar:
     st.divider()
     st.caption("FishStop — Email Security Platform")
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DATASET BUILDER
+# ══════════════════════════════════════════════════════════════════════════════
 if page == "🗃️ Dataset Builder":
-    # ═══════════════════════════════════════════════════════════════════════
-    # DATASET BUILDER
-    # ═══════════════════════════════════════════════════════════════════════
     st.header("🗃️ Dataset Builder — Aggiungi Email al Pool di Addestramento")
     st.markdown(
         "Carica file `.eml` in batch, assegna la label corretta e arricchisci il "
@@ -321,8 +324,8 @@ if page == "🗃️ Dataset Builder":
             with col_yes:
                 if st.button("✅ Sì, cancella tutto", type="primary", use_container_width=True):
                     import shutil
+                    import csv as _csv
                     with open(builder.csv_path, "w", newline="", encoding="utf-8") as f:
-                        import csv as _csv
                         _csv.DictWriter(f, fieldnames=["xt_combined", "label", "source_file", "text_hash", "added_at"]).writeheader()
                     for folder in [builder.legit_folder, builder.phishing_folder]:
                         if os.path.isdir(folder):
@@ -389,12 +392,11 @@ if page == "🗃️ Dataset Builder":
             st.warning("⚠️ Dataset sbilanciato — considera di aggiungere più email della classe minoritaria.")
         else:
             st.success("✅ Dataset pronto per il training.")
-    #scommenta per abilitare il bottone 
-    #can_train = n_legit >= 20 and n_phishing >= 20
+
     can_train = False
     if st.button("🚀 Avvia Training", type="primary",
                  disabled=not can_train,
-                 width="stretch"):
+                 use_container_width=True):
         progress_bar = st.progress(0)
         status_text  = st.empty()
 
@@ -432,26 +434,11 @@ if page == "🗃️ Dataset Builder":
         else:
             st.error(f"❌ Errore durante il training: {result['message']}")
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TRIAGE & ANALISI
+# ══════════════════════════════════════════════════════════════════════════════
 else:
-    pass  # continua sotto con il triage
-
-    # ── layout ─────────────────────────────────────────────────────────────────
-    col_upload, col_results = st.columns([1, 2])
-
-    with col_upload:
-        st.subheader("📥 Input Email")
-        uploaded_file = st.file_uploader(
-            "Trascina qui il file .eml da analizzare", type=["eml"]
-        )
-
-        if uploaded_file is not None:
-            st.success("File caricato correttamente! Elaborazione in corso…")
-            temp_path = os.path.join("data", "raw", "temp_triage.eml")
-            os.makedirs(os.path.dirname(temp_path), exist_ok=True)
-            with open(temp_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-
-
     # ── helpers ────────────────────────────────────────────────────────────────
 
     def _badge(level: str) -> str:
@@ -462,10 +449,6 @@ else:
         return "✅" if ok else "❌"
 
     def _render_abuseipdb(rep: dict, label: str = ""):
-        """
-        Widget riutilizzabile per mostrare il risultato di un lookup AbuseIPDB
-        (IP o dominio). Gestisce tutti gli stati: ok, skipped, error.
-        """
         if rep["status"] == "ok":
             score = rep["abuseConfidenceScore"]
             if rep.get("isWhitelisted"):
@@ -500,7 +483,6 @@ else:
             st.markdown(f"[🔗 Apri su AbuseIPDB]({rep['url']})")
 
         elif rep["status"] == "skipped":
-            # Distingui dominio inesistente (info SOC utile) da skip per API key mancante
             msg = rep.get("message", "")
             if "non esiste" in msg or "NXDOMAIN" in msg or "non ha record A" in msg:
                 st.warning(f"⚠️ **Dominio non risolvibile** — {msg}")
@@ -512,11 +494,6 @@ else:
             st.warning(f"⚠️ {rep['message']}")
 
     def _render_geo(geo: dict):
-        """
-        Widget compatto per la geolocalizzazione IP (ip-api.com).
-        Mostra paese/città/timezone/ASN e badge per proxy/hosting.
-        Progettato per essere chiamato inline nella card di ogni hop Received.
-        """
         if geo["status"] == "skipped":
             st.caption(f"🌍 Geo: {geo['message']}")
             return
@@ -524,11 +501,9 @@ else:
             st.caption(f"🌍 Geo non disponibile: {geo['message']}")
             return
 
-        # ── Riga principale: bandiera + città + paese ────────────────────
         flag = ""
         cc   = geo.get("country_code", "")
         if cc:
-            # Converte codice paese in emoji bandiera (Unicode Regional Indicator)
             try:
                 flag = "".join(chr(0x1F1E6 + ord(c) - ord("A")) for c in cc.upper()) + " "
             except Exception:
@@ -546,7 +521,6 @@ else:
 
         st.markdown(f"🌍 {flag}**{location_str}**{badge_str}")
 
-        # ── Riga dettagli: timezone / ISP / ASN ─────────────────────────
         details = []
         if geo.get("timezone"):
             details.append(f"🕐 `{geo['timezone']}`")
@@ -557,17 +531,11 @@ else:
         if details:
             st.caption("  ·  ".join(details))
 
-        # ── Link Google Maps (coordinate disponibili) ────────────────────
         if geo.get("lat") and geo.get("lon"):
             maps_url = f"https://maps.google.com/?q={geo['lat']},{geo['lon']}"
             st.caption(f"[📍 Apri su Maps]({maps_url})  ·  lat {geo['lat']:.4f}, lon {geo['lon']:.4f}")
 
     def _render_virustotal(vt: dict):
-        """
-        Widget riutilizzabile per mostrare il risultato di un lookup VirusTotal
-        su un hash file. Gestisce tutti gli stati: malicious, suspicious, clean,
-        not_found, skipped, error.
-        """
         status = vt["status"]
 
         if status == "malicious":
@@ -588,11 +556,10 @@ else:
         elif status == "skipped":
             st.info(f"ℹ️ {vt['message']}")
             return
-        else:  # error
+        else:
             st.warning(f"⚠️ {vt['message']}")
             return
 
-        # Metriche dettagliate (solo se VT ha risposto con dati)
         if status in ("malicious", "suspicious", "clean"):
             mc1, mc2, mc3 = st.columns(3)
             mc1.metric("🔴 Malevoli",  vt["malicious"])
@@ -610,9 +577,23 @@ else:
 
         st.markdown(f"[🔗 Apri report completo su VirusTotal]({vt['permalink']})")
 
+    # ── layout ─────────────────────────────────────────────────────────────────
+    col_upload, col_results = st.columns([1, 2])
+
+    with col_upload:
+        st.subheader("📥 Input Email")
+        uploaded_file = st.file_uploader(
+            "Trascina qui il file .eml da analizzare", type=["eml"]
+        )
+
+        if uploaded_file is not None:
+            st.success("File caricato correttamente! Elaborazione in corso…")
+            temp_path = os.path.join("data", "raw", "temp_triage.eml")
+            os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+            with open(temp_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
 
     # ── results panel ──────────────────────────────────────────────────────────
-
     with col_results:
         st.subheader("📊 Pannello di Analisi e Triage")
 
@@ -704,17 +685,13 @@ else:
                             with st.expander(f"🌐 {_lbl}"):
                                 with st.spinner(f"Interrogazione AbuseIPDB per `{_dom}`…"):
                                     _dom_rep = validator.check_domain_reputation(_dom)
-                                
-                                # --- LOGICA DI FALLBACK UNIVERSALE ---
+
                                 if _dom_rep["status"] == "skipped" and ("non esiste" in _dom_rep.get("message", "") or "NXDOMAIN" in _dom_rep.get("message", "")):
                                     parts = _dom.split(".")
-                                    
-                                    # Controlliamo se siamo davanti a un'estensione composta (es. .co.uk, .gov.it, .edu.it)
-                                    # Se il penultimo elemento è molto corto (<= 3 lettere), è quasi certamente parte del TLD
                                     if len(parts) >= 3 and len(parts[-2]) <= 3 and parts[-1] in ["uk", "it", "au", "br", "za", "jp"]:
-                                        _parent_dom = ".".join(parts[-3:]) # Prende gli ultimi 3 blocchi: sito.co.uk
+                                        _parent_dom = ".".join(parts[-3:])
                                     elif len(parts) > 2:
-                                        _parent_dom = ".".join(parts[-2:]) # Prende gli ultimi 2 blocchi: unibo.it
+                                        _parent_dom = ".".join(parts[-2:])
                                     else:
                                         _parent_dom = _dom
 
@@ -722,7 +699,6 @@ else:
                                         st.warning(f"⚠️ Il dominio `{_dom}` non è risolvibile. Provo il dominio parent universale: `{_parent_dom}`...")
                                         with st.spinner(f"Interrogazione AbuseIPDB per il parent `{_parent_dom}`…"):
                                             _dom_rep = validator.check_domain_reputation(_parent_dom)
-                                # ---------------------------------------------------
 
                                 _render_abuseipdb(_dom_rep, label=_lbl)
 
@@ -767,12 +743,10 @@ else:
                                 else:
                                     _ip_role = "By (ricevente)"
 
-                                # ── Geo inline: mostrata direttamente senza click ──
                                 with st.spinner(f"Geolocalizzazione {_ip}…"):
                                     _geo = validator.geolocate_ip(_ip)
                                 _render_geo(_geo)
 
-                                # ── Reputazione AbuseIPDB (collassata) ────────────
                                 with st.expander(f"🔍 Reputazione AbuseIPDB `{_ip}` ({_ip_role})"):
                                     with st.spinner(f"Interrogazione AbuseIPDB per {_ip}…"):
                                         ip_rep = validator.check_ip_reputation(_ip)
@@ -963,7 +937,6 @@ else:
                         else:
                             st.warning("⚠️ Impossibile verificare la coerenza (dati insufficienti)")
 
-                        # ── Hash & VirusTotal lookup automatico ────────────
                         sha256 = att.get("hash_sha256")
                         if sha256:
                             st.markdown("**🔐 Hash crittografici**")
@@ -975,13 +948,11 @@ else:
                             hc3.caption("SHA-256")
                             hc3.code(sha256,           language="text")
 
-                            # ── VirusTotal lookup automatico ───────────────
                             st.markdown("**🛡️ VirusTotal — Threat Intelligence**")
                             with st.spinner(f"Interrogazione VirusTotal per `{sha256[:16]}…`"):
                                 vt_result = validator.check_file_hash(sha256)
                             _render_virustotal(vt_result)
 
-                            # ── Link manuali (analisi approfondita) ────────
                             with st.expander("🔍 Altri servizi threat intelligence"):
                                 lc1, lc2 = st.columns(2)
                                 lc1.markdown(
@@ -997,7 +968,6 @@ else:
 
                         st.markdown("---")
 
-
                 # ── 1e-bis. Link & Lookalike Domains ──────────────────────
                 links            = soc.get("links", [])
                 lookalike_alerts = soc.get("lookalike_alerts", [])
@@ -1012,7 +982,6 @@ else:
                     if not links:
                         st.info("Nessun URL trovato nel corpo dell'email.")
                     else:
-                        # ── Lookalike alerts (mostrati per prima, in evidenza) ──
                         if lookalike_alerts:
                             st.markdown("#### ⚠️ Lookalike / Typosquatting Alerts")
                             for la in lookalike_alerts:
@@ -1037,7 +1006,6 @@ else:
                         else:
                             st.success("✅ Nessun dominio lookalike / typosquatting rilevato.")
 
-                        # ── Tabella di tutti i link ────────────────────────
                         st.markdown("#### 🔗 Tutti i link estratti")
 
                         _src_icon = {
