@@ -21,3 +21,4 @@ bs4
 pyspf
 http_session
 ipaddress
+folium 

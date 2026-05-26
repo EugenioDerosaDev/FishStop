@@ -18,7 +18,66 @@ from src.parser import EmailParserPipeline
 from src.validators import EmailSecurityValidator
 from src.analyzer import EmlSOCAnalyzer
 from src.eml_dataset_builder import EmlDatasetBuilder
+from src.components.email_globe import render_email_globe
 from src.train import BERTPhishingTrainer
+
+
+def _strip_encoded_content(raw: str) -> str:
+    """
+    Rimuove i blocchi di contenuto encoded dal testo grezzo dell'EML
+    per migliorare la leggibilità nel debugger della sidebar.
+
+    Sostituisce:
+      - Blocchi base64 (righe di soli char base64, ≥ 4 righe consecutive)
+      - Blocchi quoted-printable corposi (righe con =XX ≥ 4 consecutive)
+    con un placeholder che indica tipo e numero di righe rimosso.
+    """
+    import re
+
+    lines = raw.splitlines(keepends=True)
+    result = []
+    i = 0
+
+    # Pattern per riconoscere righe base64 pure
+    _b64_line = re.compile(r'^[A-Za-z0-9+/\r\n]+=*[\r\n]*$')
+    # Pattern per righe quoted-printable (contengono =XX)
+    _qp_line  = re.compile(r'=[0-9A-Fa-f]{2}|=$')
+
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        # ── Blocco base64: almeno 4 righe consecutive di soli char b64 ──
+        if len(stripped) >= 20 and _b64_line.match(stripped + "\n"):
+            block_start = i
+            while i < len(lines) and _b64_line.match(lines[i].strip() + "\n") and len(lines[i].strip()) >= 4:
+                i += 1
+            n = i - block_start
+            if n >= 4:
+                kb = sum(len(lines[j]) for j in range(block_start, i)) * 3 // 4 // 1024
+                result.append(f"[... contenuto base64 rimosso ({n} righe, ~{kb} KB) ...]\n")
+                continue
+
+            # Meno di 4 righe: non è un blocco, reinserisci normalmente
+            result.extend(lines[block_start:i])
+            continue
+
+        # ── Blocco quoted-printable: almeno 4 righe con encoding =XX ──
+        if _qp_line.search(stripped):
+            block_start = i
+            while i < len(lines) and _qp_line.search(lines[i].strip()):
+                i += 1
+            n = i - block_start
+            if n >= 4:
+                result.append(f"[... contenuto quoted-printable rimosso ({n} righe) ...]\n")
+                continue
+            result.extend(lines[block_start:i])
+            continue
+
+        result.append(line)
+        i += 1
+
+    return "".join(result)
 
 HF_MODEL_ID = "eugenioderodev/fishstop-bert"
 
@@ -72,17 +131,17 @@ with st.sidebar:
 
     # Controlla se c'è un EML salvato in sessione da mostrare nel debugger
     if "raw_eml_debug_data" in st.session_state and st.session_state["raw_eml_debug_data"]:
-        st.markdown("### 🪲 Raw EML Debugger")
+        st.markdown("### 🪲 Raw EML Debugger (Cleaned)")
         
-        # Generiamo una chiave unica basata sulla lunghezza e sul contenuto del testo
-        # Questo costringe Streamlit ad aggiornare l'area di testo istantaneamente
         text_value = st.session_state["raw_eml_debug_data"]
-        dynamic_key = f"sidebar_debug_{len(text_value)}_{hash(text_value)}"
+        # Usiamo il nome del file corrente come chiave per forzare il refresh pulito
+        current_file_name = st.session_state.get("current_eml_name", "default")
+        dynamic_key = f"sidebar_debug_{current_file_name}"
         
         st.text_area(
-            label="Contenuto MIME originale",
+            label="Contenuto MIME (Senza blocchi Encode)",
             value=text_value,
-            height=450,
+            height=500,
             disabled=True,
             key=dynamic_key
         )
@@ -608,9 +667,14 @@ else:
             # Estrae il testo dell'email appena caricata
             raw_text = uploaded_file.getvalue().decode("utf-8", errors="ignore")
             
-            # Se il testo è diverso da quello in sessione, aggiorna e resetta i vecchi stati
-            if st.session_state.get("raw_eml_debug_data") != raw_text:
-                st.session_state["raw_eml_debug_data"] = raw_text
+            # Controlla se il file è cambiato rispetto a quello precedentemente in memoria
+            if st.session_state.get("current_eml_name") != uploaded_file.name:
+                # Applica la rimozione dei blocchi Base64/QP
+                raw_text_debug = _strip_encoded_content(raw_text)
+                
+                # Salva i dati puliti e il nome del file nello stato della sessione
+                st.session_state["raw_eml_debug_data"] = raw_text_debug
+                st.session_state["current_eml_name"] = uploaded_file.name
                 st.rerun()
 
             st.success("File caricato correttamente! Elaborazione in corso…")
@@ -803,7 +867,10 @@ else:
                             with st.expander("Raw Received header"):
                                 st.code(hop["raw"], language="text")
                             st.markdown("---")
-
+                # ── 1b-bis. Mappa percorso geografico ─────────────────────
+                with st.expander("🌍 Percorso geografico email", expanded=True):
+                    render_email_globe(soc, validator)
+    
                 # ── 1c. Autenticazione ─────────────────────────────────────
                 with st.expander("🔑 Autenticazione (SPF / DKIM / DMARC)", expanded=True):
 
