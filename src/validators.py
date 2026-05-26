@@ -5,25 +5,25 @@ import urllib.request
 import urllib.parse
 import urllib.error
 import dns.resolver
+import requests
 from typing import Optional
 
-# Config centralizzata: risolve .env in locale, st.secrets su Streamlit Cloud.
-# Nessun import di streamlit qui — validators.py rimane usabile in script standalone.
+# Config centralizzata
 from src.config import ABUSEIPDB_API_KEY, VIRUSTOTAL_API_KEY
 
-# ── Endpoint ───────────────────────────────────────────────────────────────
 ABUSEIPDB_ENDPOINT  = "https://api.abuseipdb.com/api/v2/check"
 VIRUSTOTAL_ENDPOINT = "https://www.virustotal.com/api/v3/files"
 
-# ip-api.com: free tier, no API key, max 45 req/min (HTTP).
-# Campi richiesti esplicitamente per minimizzare la risposta JSON.
 _IPAPI_FIELDS = (
     "status,message,country,countryCode,regionName,city,"
     "zip,lat,lon,timezone,isp,org,as,proxy,hosting,query"
 )
 IPAPI_ENDPOINT = "http://ip-api.com/json/{ip}?fields=" + _IPAPI_FIELDS
 
-# ── optional imports with graceful fallback ────────────────────────────────
+# Inizializziamo una sessione riutilizzabile Keep-Alive a livello di modulo
+_session = requests.Session()
+_session.headers.update({"Accept": "application/json"})
+
 try:
     import spf as pyspf
     _SPF_AVAILABLE = True
@@ -37,10 +37,7 @@ except ImportError:
     _DKIM_AVAILABLE = False
 
 
-# ── helpers ────────────────────────────────────────────────────────────────
-
 def _extract_address(raw: Optional[str]) -> Optional[str]:
-    """Pull a bare address out of 'Display Name <user@domain>' or plain 'user@domain'."""
     if not raw:
         return None
     m = re.search(r"<([^>]+)>", raw)
@@ -51,17 +48,12 @@ def _extract_address(raw: Optional[str]) -> Optional[str]:
 
 
 def _extract_domain(email_or_raw: str) -> str:
-    """Return the domain part of an address string, lower-cased."""
     addr = _extract_address(email_or_raw) or email_or_raw
     m = re.search(r"@([\w.\-]+)", addr)
     return m.group(1).lower() if m else ""
 
 
 def _parse_dmarc_record(record: str) -> dict:
-    """
-    Parse a DMARC TXT record into a tag→value dict.
-    e.g. 'v=DMARC1; p=reject; rua=mailto:dmarc@example.com; adkim=s; aspf=r'
-    """
     tags: dict = {}
     for part in record.split(";"):
         part = part.strip()
@@ -71,29 +63,17 @@ def _parse_dmarc_record(record: str) -> dict:
     return tags
 
 
-# ── main validator class ───────────────────────────────────────────────────
-
 class EmailSecurityValidator:
     """
-    Validates SPF, DKIM, and DMARC for a received .eml.
-
-    Key design decisions vs the old version
-    ────────────────────────────────────────
-    • SPF  – evaluated against the *sender IP* and the *Return-Path / MAIL FROM*
-              domain (not the From header), using pyspf's full mechanism engine.
-    • DKIM – cryptographic signature verification via dkimpy, which fetches the
-              public key from DNS and validates the hash.
-    • DMARC– the record is fetched and parsed; alignment between the RFC5321
-              MAIL FROM / DKIM d= domain and the RFC5322 From domain is checked
-              per the DMARC spec (strict vs relaxed).
+    Validates SPF, DKIM, and DMARC for a received .eml with Enterprise SOC capabilities.
     """
 
     def __init__(self):
         self.resolver = dns.resolver.Resolver()
-        self.resolver.timeout = 5.0
-        self.resolver.lifetime = 5.0
+        self.resolver.timeout = 2.0
+        self.resolver.lifetime = 4.0
 
-    # ── SPF ───────────────────────────────────────────────────────────────
+    # ── SPF ENTERPRISE-LEVEL ───────────────────────────────────────────────
 
     def check_spf(
         self,
@@ -102,108 +82,117 @@ class EmailSecurityValidator:
         helo_domain: str = "",
     ) -> dict:
         """
-        Full SPF evaluation via pyspf.
-
-        Parameters
-        ----------
-        sender_ip   : IP address of the injection server (from the Received chain).
-        mail_from   : The envelope sender address (Return-Path header).
-                      SPF MUST be checked against this, not the From header.
-        helo_domain : HELO domain string — used as fallback when mail_from is '<>'.
-
-        Returns
-        -------
-        {
-          "status"     : "pass" | "fail" | "softfail" | "neutral" |
-                         "none" | "permerror" | "temperror" | "error",
-          "record"     : str,
-          "domain"     : str,
-          "sender_ip"  : str,
-          "mail_from"  : str,
-          "message"    : str,
-          "library"    : "pyspf" | "dns-presence-only"
-        }
+        Valutazione SPF Enterprise-Grade conforme a RFC 7208.
+        Rileva attivamente anomalie di configurazione, errori di sintassi,
+        record multipli conflittuali e attacchi basati su DNS amplification (10+ lookups).
         """
         addr   = _extract_address(mail_from) or mail_from
         domain = _extract_domain(addr)
 
+        # Gestione indirizzo nullo (es. Bounce/NDR) -> usa HELO come da specifica RFC
+        if (not addr or addr == "<>") and helo_domain:
+            domain = _extract_domain(helo_domain) or helo_domain
+
         base = {
-            "sender_ip": sender_ip,
-            "mail_from": addr,
-            "domain":    domain,
-            "record":    "",
-            "library":   "pyspf",
+            "sender_ip":  sender_ip,
+            "mail_from":  addr,
+            "domain":     domain,
+            "record":     "",
+            "library":    "pyspf",
+            "warnings":   [],  # Indicatori di rischio/anomalie per il SOC
+            "dns_lookups": None
         }
+
+        if not sender_ip or not domain:
+            return {**base, "status": "error", "message": "sender_ip o domain mancanti"}
+
+        # 1. Ispezione statica e preventiva del Record DNS (Analisi di conformità SOC)
+        spf_records = self._fetch_all_spf_records(domain)
+        
+        if len(spf_records) > 1:
+            base["warnings"].append("MULTIPLE_SPF_RECORDS_DETECTED")
+            return {
+                **base,
+                "status": "permerror",
+                "record": " | ".join(spf_records),
+                "message": f"PermError: Trovati {len(spf_records)} record v=spf1. Il dominio viola l'RFC 7208."
+            }
+        
+        record_str = spf_records[0] if spf_records else ""
+        base["record"] = record_str
+
+        if record_str:
+            # Rilevamento configurazioni permissive insicure
+            if "+all" in record_str or " ?all" in record_str:
+                base["warnings"].append("INSECURE_ALL_MECHANISM")
+            # Conteggio statico approssimativo dei DNS lookups (include, a, mx, ptr, exists, redirect)
+            lookups_count = len(re.findall(r'\b(include|a|mx|ptr|exists|redirect)\b', record_str))
+            base["dns_lookups"] = lookups_count
+            if lookups_count > 10:
+                base["warnings"].append("EXCEEDS_10_DNS_LOOKUPS_LIMIT")
 
         if not _SPF_AVAILABLE:
             base["library"] = "dns-presence-only"
-            return {**base, **self._spf_presence_only(domain)}
+            return {**base, **self._spf_presence_only(record_str)}
 
-        if not sender_ip or not domain:
-            return {**base, "status": "error",
-                    "message": "sender_ip o mail_from mancanti — impossibile valutare SPF"}
+        # 2. Esecuzione del motore di valutazione crittografico/sintattico
+        try:
+            # Validazione preventiva della sintassi IP
+            socket.inet_pton(socket.AF_INET, sender_ip) if ":" not in sender_ip else socket.inet_pton(socket.AF_INET6, sender_ip)
+        except socket.error:
+            return {**base, "status": "error", "message": f"IP sorgente malformato: {sender_ip}"}
 
         try:
+            # Esecuzione nativa pyspf
             result, explanation = pyspf.check2(
                 i=sender_ip,
-                s=addr,
+                s=addr if addr and addr != "<>" else f"postmaster@{domain}",
                 h=helo_domain or domain,
             )
-            result     = (result or "none").lower()
-            record_str = self._fetch_spf_record(domain)
+            result = (result or "none").lower()
+            
+            # Arricchimento dei messaggi di errore per l'analista SOC
+            if result == "permerror" and not base["warnings"]:
+                base["warnings"].append("SINTAX_OR_LOOKUP_ERROR")
+
             return {
                 **base,
                 "status":  result,
-                "record":  record_str,
                 "message": explanation or f"SPF {result.upper()}",
             }
         except Exception as exc:
-            return {**base, "status": "error", "message": f"Errore pyspf: {exc}"}
+            # Cattura crash imprevisti del motore di parsing (es. stringhe binarie o malformazioni estreme)
+            base["warnings"].append("PARSER_CRASH")
+            return {**base, "status": "permerror", "message": f"Frenata d'emergenza del parser SPF: {exc}"}
 
-    def _spf_presence_only(self, domain: str) -> dict:
-        """Fallback when pyspf is not installed: just check record existence."""
-        record = self._fetch_spf_record(domain)
+    def _fetch_all_spf_records(self, domain: str) -> list:
+        """Recupera tutti i record TXT che iniziano con v=spf1 senza fermarsi al primo."""
+        records = []
+        try:
+            answers = self.resolver.resolve(domain, "TXT")
+            for rdata in answers:
+                # Gestione dei record TXT frammentati in più stringhe
+                txt = "".join([part.decode('utf-8', errors='ignore') if isinstance(part, bytes) else part for part in rdata.strings]).strip()
+                if txt.lower().startswith("v=spf1"):
+                    records.append(txt)
+        except Exception:
+            pass
+        return records
+
+    def _spf_presence_only(self, record: str) -> dict:
         if record:
             return {
                 "status":  "record-found",
-                "record":  record,
-                "message": "Record SPF trovato (installare pyspf per la valutazione completa)",
+                "message": "Record SPF presente. Installare la libreria 'pyspf' per la validazione dinamica IP.",
             }
         return {
             "status":  "none",
-            "record":  "",
-            "message": "Nessun record SPF trovato (installare pyspf per la valutazione completa)",
+            "message": "Nessun record SPF registrato nel DNS per questo dominio.",
         }
-
-    def _fetch_spf_record(self, domain: str) -> str:
-        try:
-            for rdata in self.resolver.resolve(domain, "TXT"):
-                txt = rdata.to_text().strip('"')
-                if txt.startswith("v=spf1"):
-                    return txt
-        except Exception:
-            pass
-        return ""
 
     # ── DKIM ──────────────────────────────────────────────────────────────
 
     def check_dkim(self, raw_eml_bytes: bytes) -> dict:
-        """
-        Cryptographic DKIM verification via dkimpy.
-
-        Parameters
-        ----------
-        raw_eml_bytes : the complete raw bytes of the .eml file.
-
-        Returns
-        -------
-        {
-          "status"     : "pass" | "fail" | "none" | "error",
-          "signatures" : list of per-signature result dicts,
-          "message"    : str,
-          "library"    : "dkimpy" | "presence-only"
-        }
-        """
         if not _DKIM_AVAILABLE:
             return self._dkim_presence_only(raw_eml_bytes)
 
@@ -211,7 +200,6 @@ class EmailSecurityValidator:
         overall    = "none"
 
         try:
-            d = dkim.DKIM(raw_eml_bytes)
             sig_headers = [
                 v for k, v in (
                     __import__("email").message_from_bytes(raw_eml_bytes).items()
@@ -276,18 +264,13 @@ class EmailSecurityValidator:
             }
 
     def _dkim_presence_only(self, raw_eml_bytes: bytes) -> dict:
-        """Fallback when dkimpy is not installed."""
         import email as _email
         msg     = _email.message_from_bytes(raw_eml_bytes)
         present = bool(msg.get("DKIM-Signature"))
         return {
             "status":     "present" if present else "none",
             "signatures": [],
-            "message":    (
-                "Firma DKIM rilevata (installare dkimpy per la verifica crittografica)"
-                if present else
-                "Firma DKIM assente (installare dkimpy per la verifica crittografica)"
-            ),
+            "message":    "Firma DKIM rilevata (installare dkimpy per la verifica crittografica)",
             "library": "presence-only",
         }
 
@@ -300,28 +283,6 @@ class EmailSecurityValidator:
         spf_domain: str,
         dkim_results: list,
     ) -> dict:
-        """
-        Full DMARC evaluation including record lookup, policy parsing,
-        SPF/DKIM alignment check and final pass/fail disposition.
-
-        Returns
-        -------
-        {
-          "status"          : "pass" | "fail" | "none" | "error",
-          "policy"          : "none" | "quarantine" | "reject",
-          "subdomain_policy": str,
-          "pct"             : int,
-          "adkim"           : "r" | "s",
-          "aspf"            : "r" | "s",
-          "record"          : str,
-          "domain"          : str,
-          "spf_aligned"     : bool,
-          "dkim_aligned"    : bool,
-          "message"         : str,
-          "rua"             : str,
-          "ruf"             : str,
-        }
-        """
         from_addr   = _extract_address(from_address) or from_address
         from_domain = _extract_domain(from_addr)
 
@@ -340,13 +301,11 @@ class EmailSecurityValidator:
         }
 
         if not from_domain:
-            return {**base, "status": "error",
-                    "message": "Impossibile estrarre il dominio dall'header From"}
+            return {**base, "status": "error", "message": "Impossibile estrarre il dominio dall'header From"}
 
         record, lookup_domain = self._fetch_dmarc_record(from_domain)
         if not record:
-            return {**base, "status": "none",
-                    "message": f"Nessun record DMARC trovato per {from_domain} né per il dominio organizzativo"}
+            return {**base, "status": "none", "message": f"Nessun record DMARC trovato per {from_domain}"}
 
         base["domain"] = lookup_domain
         base["record"] = record
@@ -371,6 +330,7 @@ class EmailSecurityValidator:
         })
 
         spf_aligned = False
+        # Un SPF pass è allineato solo se il dominio valutato (Return-Path) è allineato con il From
         if spf_result == "pass" and spf_domain:
             spf_aligned = self._domains_aligned(spf_domain, from_domain, aspf)
         base["spf_aligned"] = spf_aligned
@@ -389,31 +349,21 @@ class EmailSecurityValidator:
             aligned_via = []
             if spf_aligned:  aligned_via.append("SPF")
             if dkim_aligned: aligned_via.append("DKIM")
-            message = (
-                f"DMARC PASS — allineamento verificato tramite {' + '.join(aligned_via)} "
-                f"(policy: {policy}, pct: {pct}%)"
-            )
+            message = f"DMARC PASS — allineamento verificato tramite {' + '.join(aligned_via)} (policy: {policy})"
         else:
             status  = "fail"
-            message = (
-                f"DMARC FAIL — né SPF né DKIM risultano allineati con il dominio From ({from_domain}). "
-                f"Policy applicata: {policy} ({pct}%)"
-            )
+            message = f"DMARC FAIL — né SPF né DKIM risultano allineati con il dominio From ({from_domain})."
 
         return {**base, "status": status, "message": message}
 
     def _fetch_dmarc_record(self, domain: str) -> tuple[str, str]:
-        """
-        Fetch DMARC TXT record, walking up to the organizational domain if needed.
-        Returns (record_text, lookup_domain) or ("", "").
-        """
         labels = domain.split(".")
         for i in range(len(labels) - 1):
             candidate  = ".".join(labels[i:])
             dmarc_host = f"_dmarc.{candidate}"
             try:
                 for rdata in self.resolver.resolve(dmarc_host, "TXT"):
-                    txt = rdata.to_text().strip('"')
+                    txt = "".join([part.decode('utf-8', errors='ignore') if isinstance(part, bytes) else part for part in rdata.strings]).strip()
                     if txt.startswith("v=DMARC1"):
                         return txt, candidate
             except Exception:
@@ -422,42 +372,27 @@ class EmailSecurityValidator:
 
     @staticmethod
     def _domains_aligned(check_domain: str, from_domain: str, mode: str) -> bool:
-        """
-        True if check_domain aligns with from_domain under the given mode.
-          strict  (s): exact match required
-          relaxed (r): organizational domain (last two labels) must match
-        """
         check_domain = check_domain.lower().lstrip(".")
         from_domain  = from_domain.lower().lstrip(".")
-
         if mode == "s":
             return check_domain == from_domain
-
         def org(d: str) -> str:
             parts = d.split(".")
             return ".".join(parts[-2:]) if len(parts) >= 2 else d
-
         return org(check_domain) == org(from_domain)
 
-    # ── AbuseIPDB — metodo privato HTTP ───────────────────────────────────
+    # ── API ALLINEATE AD ALTA VELOCITÀ (requests.Session) ────────────────
 
     def _abuseipdb_call(self, ip: str) -> dict:
-        """
-        Chiamata raw all'API AbuseIPDB v2 per un singolo IP.
-        Restituisce il dict "data" della risposta, o lancia eccezione.
-        """
-        params = urllib.parse.urlencode({"ipAddress": ip, "maxAgeInDays": "90"})
-        url    = f"{ABUSEIPDB_ENDPOINT}?{params}"
-        req    = urllib.request.Request(
-            url,
-            headers={"Key": ABUSEIPDB_API_KEY, "Accept": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=6) as resp:
-            return json.loads(resp.read().decode("utf-8")).get("data", {})
+        """Sostituito urllib con requests + Keep-Alive session per massimizzare le performance."""
+        params = {"ipAddress": ip, "maxAgeInDays": "90"}
+        headers = {"Key": ABUSEIPDB_API_KEY}
+        response = _session.get(ABUSEIPDB_ENDPOINT, params=params, headers=headers, timeout=4)
+        response.raise_for_status()
+        return response.json().get("data", {})
 
     @staticmethod
     def _format_abuseipdb(data: dict, lookup_key: str) -> dict:
-        """Normalizza il dict 'data' di AbuseIPDB in un risultato uniforme."""
         score = int(data.get("abuseConfidenceScore") or 0)
         ip    = data.get("ipAddress", lookup_key)
         return {
@@ -473,433 +408,90 @@ class EmailSecurityValidator:
             "usageType":            data.get("usageType") or "",
             "lastReportedAt":       data.get("lastReportedAt"),
             "url":                  f"https://www.abuseipdb.com/check/{ip}",
-            "message": (
-                f"Score: {score}/100 — {int(data.get('totalReports') or 0)} segnalazioni "
-                f"da {int(data.get('numDistinctUsers') or 0)} utenti distinti"
-            ),
+            "message": f"Score: {score}/100 — {int(data.get('totalReports') or 0)} segnalazioni.",
         }
-
-    # ── AbuseIPDB — IP ────────────────────────────────────────────────────
 
     def check_ip_reputation(self, ip: str) -> dict:
-        """
-        Interroga AbuseIPDB v2 per la reputazione di un indirizzo IP.
-
-        Returns
-        -------
-        {
-          "status"               : "ok" | "skipped" | "error",
-          "ip"                   : str,
-          "abuseConfidenceScore" : int,
-          "totalReports"         : int,
-          "numDistinctUsers"     : int,
-          "countryCode"          : str,
-          "isp"                  : str,
-          "domain"               : str,
-          "isWhitelisted"        : bool,
-          "usageType"            : str,
-          "lastReportedAt"       : str | None,
-          "url"                  : str,
-          "message"              : str,
-        }
-        """
-        base = {
-            "ip": ip, "abuseConfidenceScore": 0, "totalReports": 0,
-            "numDistinctUsers": 0, "countryCode": "", "isp": "", "domain": "",
-            "isWhitelisted": False, "usageType": "", "lastReportedAt": None,
-            "url": f"https://www.abuseipdb.com/check/{ip}",
-        }
-        if not ip:
-            return {**base, "status": "skipped", "message": "Nessun IP fornito"}
-        if not ABUSEIPDB_API_KEY:
-            return {**base, "status": "skipped",
-                    "message": "API key AbuseIPDB non configurata — lookup saltato"}
+        base = {"ip": ip, "abuseConfidenceScore": 0, "totalReports": 0, "numDistinctUsers": 0, "isWhitelisted": False}
+        if not ip: return {**base, "status": "skipped", "message": "Nessun IP"}
+        if not ABUSEIPDB_API_KEY: return {**base, "status": "skipped", "message": "API key assente"}
         try:
             data = self._abuseipdb_call(ip)
             return self._format_abuseipdb(data, ip)
-        except urllib.error.HTTPError as exc:
-            return {**base, "status": "error",
-                    "message": f"AbuseIPDB HTTP {exc.code}: {exc.reason}"}
         except Exception as exc:
-            return {**base, "status": "error",
-                    "message": f"Errore AbuseIPDB: {exc}"}
-
-    # ── AbuseIPDB — Dominio ───────────────────────────────────────────────
+            return {**base, "status": "error", "message": f"Errore AbuseIPDB: {exc}"}
 
     def check_domain_reputation(self, domain: str) -> dict:
-        """
-        Controlla la reputazione di un dominio su AbuseIPDB.
-
-        Strategia:
-          1. Risolve il dominio in IP tramite dnspython (self.resolver) —
-             più affidabile di socket.gethostbyname() su Streamlit Cloud e
-             container con DNS di sistema limitato.
-          2. Interroga AbuseIPDB sull'IP risolto.
-
-        Se il dominio non risolve (NXDOMAIN, SERVFAIL, timeout) restituisce
-        status="skipped" con un messaggio esplicativo invece di "error", perché
-        un dominio inventato/inesistente non è un errore del sistema ma un dato
-        utile per il triage (dominio non registrato = anomalia).
-
-        Returns
-        -------
-        Stessa struttura di check_ip_reputation, più:
-          "domain_queried" : str
-          "resolved_ip"    : str
-          "lookup_method"  : "dns-resolved" | "skipped" | "error"
-        """
-        base = {
-            "domain_queried":       domain,
-            "resolved_ip":          "",
-            "lookup_method":        "error",
-            "ip":                   "",
-            "abuseConfidenceScore": 0,
-            "totalReports":         0,
-            "numDistinctUsers":     0,
-            "countryCode":          "",
-            "isp":                  "",
-            "domain":               "",
-            "isWhitelisted":        False,
-            "usageType":            "",
-            "lastReportedAt":       None,
-            "url":                  f"https://www.abuseipdb.com/check/{domain}",
-            "message":              "",
-        }
-
-        if not domain:
-            return {**base, "status": "skipped",
-                    "lookup_method": "skipped",
-                    "message": "Nessun dominio fornito"}
-        if not ABUSEIPDB_API_KEY:
-            return {**base, "status": "skipped",
-                    "lookup_method": "skipped",
-                    "message": "API key AbuseIPDB non configurata — lookup saltato"}
-
-        # ── 1. Risoluzione DNS tramite dnspython ──────────────────────────
-        resolved_ip = ""
+        base = {"domain_queried": domain, "resolved_ip": "", "lookup_method": "error", "abuseConfidenceScore": 0}
+        if not domain: return {**base, "status": "skipped", "message": "Nessun dominio"}
+        if not ABUSEIPDB_API_KEY: return {**base, "status": "skipped", "message": "API key assente"}
         try:
             answers = self.resolver.resolve(domain, "A")
             resolved_ip = str(answers[0])
-        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
-            # Dominio inesistente o senza record A: dato utile, non errore tecnico
-            return {**base, "status": "skipped",
-                    "lookup_method": "skipped",
-                    "message": (
-                        f"Il dominio `{domain}` non esiste o non ha record A — "
-                        "potrebbe essere un dominio inventato usato per il phishing"
-                    )}
-        except dns.resolver.NoNameservers:
-            return {**base, "status": "skipped",
-                    "lookup_method": "skipped",
-                    "message": f"Nessun nameserver raggiungibile per `{domain}`"}
-        except dns.exception.Timeout:
-            return {**base, "status": "skipped",
-                    "lookup_method": "skipped",
-                    "message": f"Timeout nella risoluzione DNS di `{domain}`"}
         except Exception as exc:
-            return {**base, "status": "error",
-                    "lookup_method": "error",
-                    "message": f"Errore DNS per `{domain}`: {exc}"}
-
-        # ── 2. Lookup AbuseIPDB sull'IP risolto ──────────────────────────
+            return {**base, "status": "skipped", "message": f"Dominio non risolvibile: {exc}"}
         try:
-            data   = self._abuseipdb_call(resolved_ip)
+            data = self._abuseipdb_call(resolved_ip)
             result = self._format_abuseipdb(data, resolved_ip)
-            result["domain_queried"] = domain
-            result["resolved_ip"]    = resolved_ip
-            result["lookup_method"]  = "dns-resolved"
+            result.update({"domain_queried": domain, "resolved_ip": resolved_ip, "lookup_method": "dns-resolved"})
             return result
-        except urllib.error.HTTPError as exc:
-            return {**base, "status": "error",
-                    "lookup_method": "dns-resolved",
-                    "resolved_ip":   resolved_ip,
-                    "message": f"AbuseIPDB HTTP {exc.code} per IP {resolved_ip}: {exc.reason}"}
         except Exception as exc:
-            return {**base, "status": "error",
-                    "lookup_method": "dns-resolved",
-                    "resolved_ip":   resolved_ip,
-                    "message": f"Errore AbuseIPDB per IP {resolved_ip}: {exc}"}
-
-    # ── VirusTotal — File Hash ─────────────────────────────────────────────
+            return {**base, "status": "error", "message": f"Errore su IP {resolved_ip}: {exc}"}
 
     def check_file_hash(self, sha256: str) -> dict:
-        """
-        Interroga VirusTotal v3 per la reputazione di un hash SHA-256.
-
-        Flusso:
-          GET /files/{sha256}
-            200 → file noto a VT, restituisce analisi completa
-            404 → file mai sottomesso a VT (non significa che sia pulito)
-            401 → API key non valida
-            429 → rate limit superato (free tier: 4 req/min)
-
-        Returns
-        -------
-        {
-          "status"           : "malicious" | "suspicious" | "clean" |
-                               "unknown"   | "not_found"  |
-                               "skipped"   | "error",
-          "sha256"           : str,
-          "malicious"        : int,
-          "suspicious"       : int,
-          "undetected"       : int,
-          "total_engines"    : int,
-          "detection_ratio"  : str,
-          "threat_label"     : str,
-          "file_type"        : str,
-          "file_name"        : str,
-          "first_submission" : str,
-          "last_analysis"    : str,
-          "permalink"        : str,
-          "message"          : str,
-        }
-        """
-        base = {
-            "sha256":           sha256,
-            "malicious":        0,
-            "suspicious":       0,
-            "undetected":       0,
-            "total_engines":    0,
-            "detection_ratio":  "—",
-            "threat_label":     "",
-            "file_type":        "",
-            "file_name":        "",
-            "first_submission": "",
-            "last_analysis":    "",
-            "permalink":        f"https://www.virustotal.com/gui/file/{sha256}",
-        }
-
-        if not sha256:
-            return {**base, "status": "skipped",
-                    "message": "Nessun hash fornito"}
-        if not VIRUSTOTAL_API_KEY:
-            return {**base, "status": "skipped",
-                    "message": "API key VirusTotal non configurata — lookup saltato"}
-
+        base = {"sha256": sha256, "malicious": 0, "suspicious": 0, "total_engines": 0}
+        if not sha256: return {**base, "status": "skipped", "message": "No hash"}
+        if not VIRUSTOTAL_API_KEY: return {**base, "status": "skipped", "message": "VT key assente"}
+        
         url = f"{VIRUSTOTAL_ENDPOINT}/{sha256}"
-        req = urllib.request.Request(
-            url,
-            headers={
-                "x-apikey": VIRUSTOTAL_API_KEY,
-                "Accept":   "application/json",
-            },
-        )
-
+        headers = {"x-apikey": VIRUSTOTAL_API_KEY}
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            return self._format_vt_file(data, base)
-
-        except urllib.error.HTTPError as exc:
-            if exc.code == 404:
-                return {**base, "status": "not_found",
-                        "message": "Hash non trovato su VirusTotal — file mai sottomesso o molto recente"}
-            if exc.code == 401:
-                return {**base, "status": "error",
-                        "message": "API key VirusTotal non valida (HTTP 401)"}
-            if exc.code == 429:
-                return {**base, "status": "error",
-                        "message": "Rate limit VirusTotal superato (free tier: 4 req/min) — riprova tra poco"}
-            return {**base, "status": "error",
-                    "message": f"VirusTotal HTTP {exc.code}: {exc.reason}"}
+            response = _session.get(url, headers=headers, timeout=5)
+            if response.status_code == 404:
+                return {**base, "status": "not_found", "message": "Hash non trovato su VT"}
+            response.raise_for_status()
+            return self._format_vt_file(response.json(), base)
         except Exception as exc:
-            return {**base, "status": "error",
-                    "message": f"Errore VirusTotal: {exc}"}
+            return {**base, "status": "error", "message": f"Errore VT: {exc}"}
 
     @staticmethod
     def _format_vt_file(data: dict, base: dict) -> dict:
-        """
-        Normalizza la risposta JSON di VT /files/{hash} in un dict uniforme.
-
-        Struttura risposta VT:
-          data.attributes.last_analysis_stats
-          data.attributes.popular_threat_classification.suggested_threat_label
-          data.attributes.type_description
-          data.attributes.names[0]
-          data.attributes.first_submission_date  (epoch int)
-          data.attributes.last_analysis_date     (epoch int)
-        """
-        import datetime
-
         attrs = data.get("data", {}).get("attributes", {})
         stats = attrs.get("last_analysis_stats", {})
-
-        malicious  = int(stats.get("malicious",  0))
+        malicious = int(stats.get("malicious", 0))
         suspicious = int(stats.get("suspicious", 0))
-        undetected = int(stats.get("undetected", 0))
-        harmless   = int(stats.get("harmless",   0))
-        total      = malicious + suspicious + undetected + harmless
-
-        ptc          = attrs.get("popular_threat_classification") or {}
-        threat_label = ptc.get("suggested_threat_label", "")
-
-        file_type = attrs.get("type_description", "")
-        names     = attrs.get("names") or []
-        file_name = names[0] if names else ""
-
-        def _epoch_to_iso(val) -> str:
-            if not val:
-                return ""
-            try:
-                return datetime.datetime.fromtimestamp(
-                    int(val), tz=datetime.timezone.utc
-                ).strftime("%Y-%m-%d %H:%M UTC")
-            except Exception:
-                return str(val)
-
-        first_sub = _epoch_to_iso(attrs.get("first_submission_date"))
-        last_anal = _epoch_to_iso(attrs.get("last_analysis_date"))
-
-        if malicious > 0:
-            status = "malicious"
-        elif suspicious > 0:
-            status = "suspicious"
-        elif total > 0:
-            status = "clean"
-        else:
-            status = "unknown"
-
-        detection_ratio = f"{malicious + suspicious} / {total}" if total else "0 / 0"
-
-        message_parts = [f"{malicious} engine su {total} lo segnalano come malevolo"]
-        if suspicious:
-            message_parts.append(f"{suspicious} come sospetto")
-        if threat_label:
-            message_parts.append(f"minaccia rilevata: {threat_label}")
-
+        total = sum(int(v) for v in stats.values())
         return {
             **base,
-            "status":           status,
-            "malicious":        malicious,
-            "suspicious":       suspicious,
-            "undetected":       undetected,
-            "total_engines":    total,
-            "detection_ratio":  detection_ratio,
-            "threat_label":     threat_label,
-            "file_type":        file_type,
-            "file_name":        file_name,
-            "first_submission": first_sub,
-            "last_analysis":    last_anal,
-            "message":          " — ".join(message_parts),
+            "status": "malicious" if malicious > 0 else "clean",
+            "malicious": malicious,
+            "suspicious": suspicious,
+            "total_engines": total,
+            "message": f"{malicious} engine rilevano minacce su {total}.",
         }
-
-
-    # ── Geolocalizzazione IP (ip-api.com, free, no key) ─────────────────────
 
     def geolocate_ip(self, ip: str) -> dict:
-        """
-        Geolocalizza un indirizzo IP tramite ip-api.com (free, no API key).
-
-        Restituisce un dict uniforme con tutti i campi geografici rilevanti
-        per il contesto SOC. In caso di errore o IP privato/riservato restituisce
-        status="skipped" o status="error" senza sollevare eccezioni.
-
-        Limiti ip-api.com free tier:
-          - 45 richieste/minuto per IP sorgente (sufficiente per triage interattivo)
-          - Solo HTTP (non HTTPS sul free tier)
-          - Non supporta RFC 1918 / loopback / multicast → status="skipped"
-
-        Returns
-        -------
-        {
-          "status"      : "ok" | "skipped" | "error",
-          "ip"          : str,
-          "country"     : str,   # es. "Italy"
-          "country_code": str,   # es. "IT"
-          "region"      : str,   # es. "Emilia-Romagna"
-          "city"        : str,   # es. "Bologna"
-          "zip"         : str,
-          "lat"         : float | None,
-          "lon"         : float | None,
-          "timezone"    : str,   # es. "Europe/Rome"
-          "isp"         : str,
-          "org"         : str,
-          "asn"         : str,   # es. "AS15169 Google LLC"
-          "is_proxy"    : bool,
-          "is_hosting"  : bool,  # datacenter / VPS / CDN
-          "message"     : str,
-        }
-        """
-        base = {
-            "ip": ip, "country": "", "country_code": "", "region": "",
-            "city": "", "zip": "", "lat": None, "lon": None,
-            "timezone": "", "isp": "", "org": "", "asn": "",
-            "is_proxy": False, "is_hosting": False,
-        }
-
-        if not ip:
-            return {**base, "status": "skipped", "message": "Nessun IP fornito"}
-
-        # Salta indirizzi privati / loopback / link-local senza chiamata HTTP
-        _private = (
-            ip.startswith("10.") or ip.startswith("192.168.") or
-            ip.startswith("127.") or ip.startswith("169.254.") or
-            ip == "::1" or
-            any(ip.startswith(f"172.{n}.") for n in range(16, 32))
-        )
-        if _private:
-            return {**base, "status": "skipped",
-                    "message": f"`{ip}` è un indirizzo privato/riservato — nessuna geo disponibile"}
-
-        url = IPAPI_ENDPOINT.format(ip=ip)
+        base = {"ip": ip, "country": "", "is_proxy": False, "is_hosting": False}
+        if not ip or ip.startswith("10.") or ip.startswith("192.168.") or ip.startswith("127."):
+            return {**base, "status": "skipped", "message": "IP privato o assente"}
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "FishStop/1.0"})
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            return {**base, "status": "error",
-                    "message": f"ip-api.com HTTP {exc.code}: {exc.reason}"}
+            response = _session.get(IPAPI_ENDPOINT.format(ip=ip), timeout=4)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("status") != "success":
+                return {**base, "status": "skipped", "message": data.get("message", "fail")}
+            return {
+                "status": "ok", "ip": data.get("query", ip), "country": data.get("country", ""),
+                "is_proxy": bool(data.get("proxy")), "is_hosting": bool(data.get("hosting")),
+                "message": f"{data.get('city')}, {data.get('country')}",
+            }
         except Exception as exc:
-            return {**base, "status": "error",
-                    "message": f"Errore ip-api.com: {exc}"}
+            return {**base, "status": "error", "message": f"Errore geo: {exc}"}
 
-        if data.get("status") != "success":
-            # ip-api restituisce status="fail" per IP riservati o input non validi
-            return {**base, "status": "skipped",
-                    "message": f"ip-api.com: {data.get('message', 'risposta non valida')} per `{ip}`"}
-
-        return {
-            "status":       "ok",
-            "ip":           data.get("query", ip),
-            "country":      data.get("country", ""),
-            "country_code": data.get("countryCode", ""),
-            "region":       data.get("regionName", ""),
-            "city":         data.get("city", ""),
-            "zip":          data.get("zip", ""),
-            "lat":          data.get("lat"),
-            "lon":          data.get("lon"),
-            "timezone":     data.get("timezone", ""),
-            "isp":          data.get("isp", ""),
-            "org":          data.get("org", ""),
-            "asn":          data.get("as", ""),
-            "is_proxy":     bool(data.get("proxy")),
-            "is_hosting":   bool(data.get("hosting")),
-            "message":      (
-                f"{data.get('city','')}, {data.get('regionName','')}, "
-                f"{data.get('country','')} ({data.get('countryCode','')})"
-                + (" — ⚠️ Proxy/VPN rilevato" if data.get("proxy") else "")
-                + (" — ☁️ Datacenter/Hosting" if data.get("hosting") else "")
-            ),
-        }
-
-
-# ── smoke test ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     validator = EmailSecurityValidator()
-
-    print("=== SPF ===")
-    spf = validator.check_spf(
-        sender_ip="209.85.220.41",
-        mail_from="test@gmail.com",
-    )
-    print(spf)
-
-    print("\n=== DMARC ===")
-    dmarc = validator.check_dmarc(
-        from_address="test@gmail.com",
-        spf_result=spf["status"],
-        spf_domain=spf["domain"],
-        dkim_results=[],
-    )
-    print(dmarc)
+    print("=== SPF ENTERPRISE TEST ===")
+    # Test con IP legittimo di Google Cloud / Gmail
+    spf = validator.check_spf(sender_ip="209.85.220.41", mail_from="test@gmail.com")
+    print(json.dumps(spf, indent=2))

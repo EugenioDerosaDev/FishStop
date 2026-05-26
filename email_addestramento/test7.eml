@@ -1,0 +1,1106 @@
+Received: from GVXPR01MB10944.eurprd01.prod.exchangelabs.com
+ (2603:10a6:150:218::12) by DBAPR01MB6920.eurprd01.prod.exchangelabs.com with
+ HTTPS; Fri, 3 Apr 2026 11:44:06 +0000
+ARC-Seal: i=6; a=rsa-sha256; s=arcselector10001; d=microsoft.com; cv=pass;
+ b=VhuKMQsz/Cu0bZDhsqaSU3QX47+6QtEdlUtMnDGu4/Z+HDpUo01QkYLVmRvLTD0yz+NWf8ixYWyNO/XrkQHCpkBEn/bl4gtEVc/p+iRu9PdgiOcmK7dWQE2cgTND0Kztq4XGk0i8KW4JM2Et2WBGF0arpLxtNz9jNgOvEbY9b4ECU3a356hYdaWaNRzJedAEG5dCe5Oo1vd4DC7rekngqmoitJgE8TU/9/cebSe5TbSubA2/ic1GiCD0wEsDXeLIiR61rFyG9X5ZTQ+zrYbuEx59+jJROzHIQ4n5bG/2lL/6fclSAsLMDnTH0CjHKXL6RHWasSN6W7N3HDlo9I+qHg==
+ARC-Message-Signature: i=6; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector10001;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=hsJp+eLoWVwwsXalq0nDC/Lhp2ADFbdXTw3nHgmXFR0=;
+ b=PPruVFMxc5z71Q7xHGxbNWQThxF7b6l2iWrKqA6jjhjNS1QmrH+/sH0ZsakDrAhPwTyPzpM6RF3Ojklwy7lAbo4PvqDa7I7Kk3+tPJJDwOF0ECmIKl39GzQaPWQ9jHdI519jH6nEWlXUzEi0IO7c4y4NjrQlq6O20QQrw+4i6wnX8Ehz1eTUv75zZKftkms/7fcM9hP+pquFCAogY+Zk7RvPuKBz6muByGuI3EiTldhIRp0tKmzIaew0/GxH5LO022MQtYyL8U8WuhWXmcbbKxcbuhQ8giyai9gwPFI4s7QwZ2n7TVqzH3l6Y2qm0fLknNfvP60ieB7hOKSiUDKzbA==
+ARC-Authentication-Results: i=6; mx.microsoft.com 1; spf=pass (sender ip is
+ 209.85.128.71) smtp.rcpttodomain=cefla.onmicrosoft.com
+ smtp.mailfrom=cefla.it; dmarc=pass (p=reject sp=reject pct=100) action=none
+ header.from=cefla.it; dkim=none (message not signed); arc=pass (0 oda=1
+ ltdi=1
+ spf=[1,5,smtp.mailfrom=teamsecurity+bncbcbildxivugbb66px3hamgqeqmdaeoi@cefla.it]
+ dkim=[1,1,header.d=cefla.it] dmarc=[1,5,header.from=cefla.it])
+Received: from CWLP265CA0496.GBRP265.PROD.OUTLOOK.COM (2603:10a6:400:18b::17)
+ by GVXPR01MB10944.eurprd01.prod.exchangelabs.com (2603:10a6:150:218::12) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.9769.17; Fri, 3 Apr
+ 2026 11:44:00 +0000
+Received: from AMS0EPF0000019C.eurprd05.prod.outlook.com
+ (2603:10a6:400:18b:cafe::63) by CWLP265CA0496.outlook.office365.com
+ (2603:10a6:400:18b::17) with Microsoft SMTP Server (version=TLS1_3,
+ cipher=TLS_AES_256_GCM_SHA384) id 15.20.9769.21 via Frontend Transport; Fri,
+ 3 Apr 2026 11:44:00 +0000
+Authentication-Results: spf=pass (sender IP is 209.85.128.71)
+ smtp.mailfrom=cefla.it; dkim=none (message not signed)
+ header.d=none;dmarc=pass action=none header.from=cefla.it;compauth=pass
+ reason=100
+Received-SPF: Pass (protection.outlook.com: domain of cefla.it designates
+ 209.85.128.71 as permitted sender) receiver=protection.outlook.com;
+ client-ip=209.85.128.71; helo=mail-wm1-f71.google.com; pr=C
+Received: from mail-wm1-f71.google.com (209.85.128.71) by
+ AMS0EPF0000019C.mail.protection.outlook.com (10.167.16.248) with Microsoft
+ SMTP Server (version=TLS1_3, cipher=TLS_AES_256_GCM_SHA384) id 15.20.9769.17
+ via Frontend Transport; Fri, 3 Apr 2026 11:43:58 +0000
+Received: by mail-wm1-f71.google.com with SMTP id 5b1f17b1804b1-4887f516cf5so13532925e9.1
+        for <eugeniomaria.derosa.ext@cefla.onmicrosoft.com>; Fri, 03 Apr 2026 04:43:58 -0700 (PDT)
+ARC-Seal: i=5; a=rsa-sha256; t=1775216638; cv=pass;
+        d=google.com; s=arc-20240605;
+        b=gl1A0YjfjYmzV+izUsG9HYZL7+SiJK34XxoQBuAS0yT8i2T+gtXA30sU9ml8QGPVf4
+         J4Z2RbQ/eYCRUGfzNFld1mICLzdfQVFLQiUlB5RFE5Er5CR8F8kyadUkMiEJD6KyrV0y
+         UZx4Cw/4Z7RqODMTwwh/RncMOZvA2oU2VLSkXozQzWlvO8p/ZCEfi9D/VrkRq9OThI8N
+         oeyP9zA5Tw3Z4DLrskqucuAjPygLTB9uuBie7VMLWCal5Lbae0Fo9ybDj97J7I6+B4pR
+         IG1Buw61Y/jVzA59SlGG3q/vmEhZCkAATgxeS7DXc7aX2/drBv0ROPehVgSbXmohCBlz
+         nSYQ==
+ARC-Message-Signature: i=5; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605;
+        h=list-unsubscribe:list-archive:list-help:list-post:list-id
+         :mailing-list:precedence:mime-version:msip_labels:content-language
+         :accept-language:in-reply-to:references:message-id:date:thread-index
+         :thread-topic:subject:cc:to:from;
+        bh=hsJp+eLoWVwwsXalq0nDC/Lhp2ADFbdXTw3nHgmXFR0=;
+        fh=taggzN9/sAxHmEY4Cb67JRNzRm3ZwNrcBNfB3qp0xQo=;
+        b=SxnooVNurdCrrtOO0EO1JiDUTWcHU+dDoKV1Ka4Do2orPnzbmwjBywzgfTGGlPGdkb
+         h84Vb7Zq8amQqinJikUEdz+G0GU0BYcnI9qsnDGK2FGkkbU9q1WE133oYAR2GZBV2f2j
+         lLArODeXf360fgq0YFefcJXDgTauCY/piW+SXhK7A3D1Qc7QQh/ZZgwmySdSMgZ72GrI
+         NY+fT67aneMMu4IPH/mlWmrSmeubyVcjKLefxIxL0fcRXWKr1lb36bRFNu26I21loo0r
+         ldynccx4XMYdA8oDVR+EKqTQ/yHp4PbLxcsvUQ5+firCN2kzjdry3ZZoWJtmgvuWYvuE
+         PAiw==;
+        dara=google.com
+ARC-Authentication-Results: i=5; mx.google.com;
+       arc=pass (i=3 spf=pass spfdomain=cefla.it dkim=pass dkdomain=cefla.onmicrosoft.com dmarc=pass fromdomain=cefla.it);
+       spf=pass (google.com: domain of teamsecurity+bncbcbildxivugbb66px3hamgqeqmdaeoi@cefla.it designates 209.85.220.69 as permitted sender) smtp.mailfrom=teamsecurity+bncBCBILDXIVUGBB66PX3HAMGQEQMDAEOI@cefla.it;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=cefla.it;
+       dara=fail header.i=@cefla.it
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20251104; t=1775216638; x=1775821438;
+        h=list-unsubscribe:list-archive:list-help:list-post
+         :x-spam-checked-in-group:list-id:mailing-list:precedence
+         :x-original-authentication-results:x-original-sender:mime-version
+         :msip_labels:content-language:accept-language:in-reply-to:references
+         :message-id:date:thread-index:thread-topic:subject:cc:to:from
+         :x-beenthere:x-gm-gg:x-gm-message-state:from:to:cc:subject:date
+         :message-id:reply-to;
+        bh=hsJp+eLoWVwwsXalq0nDC/Lhp2ADFbdXTw3nHgmXFR0=;
+        b=j/6HxDw0w7nuCbNY2bXaT3MVwp+nbe+4MKPaOjeKWFZfRVM5MjwKiYNowj3N/kLfji
+         TE3uYexvtJ4r5YObhA1VTRrQTi5OkjJ4u2xtvPppv9UMfPlSQX66AIYwXLSehLTkw1xP
+         uGPolSHkOLDwbCHc1DrdmCNnPys7d+9dXDKATRx4eLJABJ6yDpkR0PwOQB468Rm/X2rD
+         z3MwCtzotNSkbqyEFPjlAQgeWbnIpgrIx4jPdLP+SrsLeji1sSgFh9Bo4k21jgr80jn8
+         RaC3su2U4JxIrbbavkCyTZtrqnPEZ3dh48UXth6LkeNd8RuNoLwzobOw6C7ayMtIbKXU
+         QoVw==
+X-Forwarded-Encrypted: i=5; AJvYcCXrANdmTrkXcgappJ9VI7HdKvLeb04rSfE7vynL5pTFnfpdyrhQX8HlRpWz0dCh7rmkMz+eenAwsB8wsRWKME50ZnSxKSDpeg==@cefla.onmicrosoft.com
+X-Gm-Message-State: AOJu0YxDcK9TPUUrNaSh2PSOppAfsxzaojXJAn83dinHnO4JamnWbpXr
+	+Vp5wJ9olCob3Im8PFLBTm/FCLTNU2HlJZ04GJ1coRZqTohZ+ZYYRGX1AMNGF2kFsRqW/jhS1XG
+	bB3OTJzrN4jUkcJOh+P2zN0k4HGgDY+97GFB3aSPGi1BrLTsYjV3R31ur5WkOCW+aUHh3YmXSEU
+	TWrjHDkhMba/wpvObgn/CeHat8T5zpfqtCvqBjEeIisegkIHLbHPn6HkNkZ/AxqavL5WVp
+X-Gm-Gg: ATEYQzxC/EDVXDjzoaYcebJWftPiltBUmf+o+MC/W7NEEltdmuEQOC9+J3RuBgFtxNM
+	+DHvWTL+budbQbdzSDVlNbmAXMh+G8m1xxVdz7ds6K61WjEXLuFIpHDf7dwP7U2Uh4yUoAR25OX
+	T7oXE3biDp/UQWs0KSrul6ZTIKkj9ZlefsuHxY6YX5rIpvZTTrjeNT/hMqfzsXNkDz23C+p+vVV
+	jSmiQwLQ78wt6atxBwQhyIuWgLjWZFYBHxCJ+zyWViIAs3Nlzp4sMacoHFYwH/zn/FGWL/bbccG
+	8x7vGp9q8oAU04fvwtqOJBqZbpQy51orJbwVP+yPXgze3w==
+X-Received: by 2002:a05:600c:348e:b0:488:96a3:37c0 with SMTP id 5b1f17b1804b1-4889979550emr40713745e9.22.1775216638396;
+        Fri, 03 Apr 2026 04:43:58 -0700 (PDT)
+X-Received: by 2002:a05:600c:348e:b0:488:96a3:37c0 with SMTP id 5b1f17b1804b1-4889979550emr40712745e9.22.1775216637109;
+        Fri, 03 Apr 2026 04:43:57 -0700 (PDT)
+ARC-Seal: i=4; a=rsa-sha256; t=1775216637; cv=pass;
+        d=google.com; s=arc-20240605;
+        b=UVfz9SnhXvwQ/ZElsJphYsaMnaq+wcFM5eIlxmq41OUbrGGSb0mV49F/eOHfC2K1hQ
+         NirhIOqiX0Fpt41U8/naai3B+YKiTulKkaxZV7Y9PwiHnNZloBltXyTQCwatCW3NI9GM
+         OGTYKoH/7o4r4ZctGtyj6zp2Mk/Uw3zJJ+8z8I8Fk2JWnlv4tLI60RgJhb7Ovas2jQ/j
+         R5CEcTv1r2y4JErRIpxxtkgMFihZhZa1SEhZMU5OJLrfAb8UHa2DX1vcDQ6ci/KEn76O
+         BPBbPBMt8XES4vvNnRspLB0pRfAivFoHn/9y8v0jM4k7D0dVChlDYzfe0IT1G44/b7Ff
+         fxbA==
+ARC-Message-Signature: i=4; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605;
+        h=list-unsubscribe:list-archive:list-help:list-post:list-id
+         :mailing-list:precedence:mime-version:msip_labels:content-language
+         :accept-language:in-reply-to:references:message-id:date:thread-index
+         :thread-topic:subject:cc:to:from;
+        bh=hsJp+eLoWVwwsXalq0nDC/Lhp2ADFbdXTw3nHgmXFR0=;
+        fh=f6u4zVBEeK2qq8Mj0exyVgrTnWTHivPLodK9BgVf5vc=;
+        b=ASe7EWuxQ6jus7QheLDJwHPnWg7VlFIxK69QLORsl56oxq1nrB2QBXiUudXaax4i3C
+         yV0wdHxdKqn5V7puicyqBJZNeFx+0Z6i6EUHSa6oXitV6Hgn2N6tXYImIbBPzbmCUQpX
+         NYs+xOpELDKlu02OxL/ZF88MXLmNlvUHrXIyVPVv3jnKPxlOXNFxGdzSsIkp5WDOJDMR
+         rH3G1lP0hTzu5pT9Mg21WEJM0mKi0nm1cdBbW5BfDThMHdypYRu5fXs4GQvI2zHeLcxA
+         mPYM+LnjFHA7gAIPwjK/z6BTbRZe0N3/JLCb2dk2sD1oV9rFZaS3vEJcqCHmGdBpPEju
+         ZpHA==;
+        dara=google.com
+ARC-Authentication-Results: i=4; mx.google.com;
+       arc=pass (i=3 spf=pass spfdomain=cefla.it dkim=pass dkdomain=cefla.onmicrosoft.com dmarc=pass fromdomain=cefla.it);
+       spf=pass (google.com: domain of teamsecurity+bncbcbildxivugbb66px3hamgqeqmdaeoi@cefla.it designates 209.85.220.69 as permitted sender) smtp.mailfrom=teamsecurity+bncBCBILDXIVUGBB66PX3HAMGQEQMDAEOI@cefla.it;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=cefla.it;
+       dara=fail header.i=@cefla.it
+Return-Path: teamsecurity+bncBCBILDXIVUGBB66PX3HAMGQEQMDAEOI@cefla.it
+Received: from mail-sor-f69.google.com (mail-sor-f69.google.com. [209.85.220.69])
+        by mx.google.com with SMTPS id 5b1f17b1804b1-4888a76eaf8sor9641515e9.19.2026.04.03.04.43.56
+        for <eugeniomaria.derosa.ext@cefla.it>
+        (Google Transport Security);
+        Fri, 03 Apr 2026 04:43:57 -0700 (PDT)
+Received-SPF: pass (google.com: domain of teamsecurity+bncbcbildxivugbb66px3hamgqeqmdaeoi@cefla.it designates 209.85.220.69 as permitted sender) client-ip=209.85.220.69;
+Authentication-Results-Original: mx.google.com;       arc=pass (i=3 spf=pass
+ spfdomain=cefla.it dkim=pass dkdomain=cefla.onmicrosoft.com dmarc=pass
+ fromdomain=cefla.it);       spf=pass (google.com: domain of
+ teamsecurity+bncbcbildxivugbb66px3hamgqeqmdaeoi@cefla.it designates
+ 209.85.220.69 as permitted sender)
+ smtp.mailfrom=teamsecurity+bncBCBILDXIVUGBB66PX3HAMGQEQMDAEOI@cefla.it;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=cefla.it;
+       dara=fail header.i=@cefla.it
+ARC-Seal: i=3; a=rsa-sha256; t=1775216636; cv=pass;
+        d=google.com; s=arc-20240605;
+        b=LczMmqgb6hoYXyBh3B5HqwPOhttC62UbTGBR/ShLvg32G24wXJl0gEei14Y81okflD
+         R6JpY/mr+kTBv9+NRhDO8NbBCNDbL0Nps5FCSm1vIKZaNVbk1Pfdn983AajAKo2akcpC
+         GyqxV6PCFKFQlhhEl9EfKm4bQzYdtiwzTmcbFXdViAdydG6u9+N7AS+4lrODn9hNKtQV
+         RqfcIDFM+0MhkFv399T27BmOX12GBF3DjXwxWFqiennGvn4dc2kHoFGgERw1CbWO+1Kf
+         VBy98nxmXnsuXxurI+L5P96iDXxi9YRI3SKpZQiFZAj5KUSEvXCMH7+yYqIVTIuNCB6d
+         ShhA==
+ARC-Message-Signature: i=3; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605;
+        h=list-unsubscribe:list-archive:list-help:list-post:list-id
+         :mailing-list:precedence:mime-version:msip_labels:content-language
+         :accept-language:in-reply-to:references:message-id:date:thread-index
+         :thread-topic:subject:cc:to:from;
+        bh=hsJp+eLoWVwwsXalq0nDC/Lhp2ADFbdXTw3nHgmXFR0=;
+        fh=f6u4zVBEeK2qq8Mj0exyVgrTnWTHivPLodK9BgVf5vc=;
+        b=JG+DFLodTRuM9R0H35eno9W1TJoek5qCL82SVrEmR3XhE6OYHR9Tb6P2CLFDWXyJgE
+         Fu9WYlKogAPtImKmcpwZkp+ty1QDHKiqST7kYfTXwA75f8yQDJlkWqW29ylQPqPm0cbi
+         l+my9xV3ieumAK99Ax+A0MMDXNjyxqoWAtmcHC9JUDH1CqkLia5tnqHl9RM9K53IlU7M
+         0YhdpL7/J769YqQJrO5BaHxBzGlY58rC7GTyW1CJ4xG/R5cyfhLRCPY0j9+AoTGvP5vd
+         /hPy2nr4B3dfiNegVOMxs853CBAqhRk7sWmaXw9WQG3UxbvFXGCI+pDn7meW77886iXM
+         m9lg==;
+        darn=cefla.it
+ARC-Authentication-Results: i=3; mx.google.com;
+       dkim=pass header.i=@cefla.onmicrosoft.com header.s=selector2-cefla-onmicrosoft-com header.b=VOyQQrIc;
+       arc=pass (i=1 spf=pass spfdomain=cefla.it dkim=pass dkdomain=cefla.it dmarc=pass fromdomain=cefla.it);
+       spf=pass (google.com: domain of davide.seller@cefla.it designates 2a01:111:f403:c201::d as permitted sender) smtp.mailfrom=davide.seller@cefla.it;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=cefla.it
+X-Forwarded-Encrypted: i=3; AJvYcCVdJAzSzNM4GEdT0h598kaJE8K2i9OgbWi93AFENKyvwLk1UMifEQ+jaQPFuP0wRqWxM60+yV2r2Et1R1RRSZ8quY1I1IDHGQ==@cefla.it
+X-Received: by 2002:a05:600c:1d1d:b0:485:3af5:7e53 with SMTP id 5b1f17b1804b1-48899775e08mr38820545e9.19.1775216636211;
+        Fri, 03 Apr 2026 04:43:56 -0700 (PDT)
+X-BeenThere: teamsecurity@cefla.it; h="AYAyTiJ3YjVARSzRvBSpL+wEgqD+zoV2kETU5NJGzPtngNEkJw=="
+Received: by 2002:a05:600c:4496:b0:488:971e:25de with SMTP id
+ 5b1f17b1804b1-488971e2696ls4546265e9.0.-pod-prod-03-eu; Fri, 03 Apr 2026
+ 04:43:55 -0700 (PDT)
+X-Received: by 2002:a05:600c:530d:b0:485:3692:e8f7 with SMTP id 5b1f17b1804b1-488997b7d62mr42305145e9.25.1775216635007;
+        Fri, 03 Apr 2026 04:43:55 -0700 (PDT)
+ARC-Seal: i=2; a=rsa-sha256; t=1775216634; cv=pass;
+        d=google.com; s=arc-20240605;
+        b=WhKGOGeOekKK3iJMdPxwvKojBIOHwraRfgd0OmJijLw6ibbhwiWt29WwfqBx8YyWvk
+         y5xB5IdpzZl6abr3tNz5PUMycg9RdHKHHd2Hu5gJ3V/80xwJX0It3gBrt3lJCBx7W5W6
+         s9um2HMX4eGgf2EGzMTFATsJ/HPrPT8tWCJBTREPOpMvpEcFgZQ3eXa2CQn/29ADmpZB
+         5nw7lLj66srv/OL24wjCBV0odIz2rnEHl5q/rCWZcsdSyUafZXXDayDOmAu3WMYQE6kD
+         Rs8lLXx8k8kEvJWBG9B2QcYESbBbqQR88kHWQEIPU8ULnQATJ+eVUh6nfGJKvma+nMed
+         QL7A==
+ARC-Message-Signature: i=2; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605;
+        h=mime-version:msip_labels:content-language:accept-language
+         :in-reply-to:references:message-id:date:thread-index:thread-topic
+         :subject:cc:to:from:dkim-signature;
+        bh=hsJp+eLoWVwwsXalq0nDC/Lhp2ADFbdXTw3nHgmXFR0=;
+        fh=q+9riz52Gb2aGadcUEc9gZv3SiQ2q29/vuWkmZ5MRiE=;
+        b=LHh05foo9wlhIcAGabNSe9wvOjqon9Ak7LSDUVOZgMKP3tjGyx11WsMPi5gVm4PBFT
+         pcmhuSDfqOfJX+j5vV2IAt4R6/jltLS7ue4trDNFtHoBzqIMdXx8zdrM21F5yMGeq8O/
+         hQMha4J5XJyX2ueHATW0EqPeWFMWA0js+ig21Rm2izzDtxv5XJ38L2DC5MTO8hbFtV+l
+         EnDEJgnp+7RSa+xKi4VNYtjYLVwhX2ZxKlDgb8BvuMOGPwMgbB6pMdPMpcIWHKYql5Dk
+         mFFxrDMzP8adywFMXy2xLTyoflCOKsAqx5VJLJ3nyI4OzhyIYHyWMdKkGOF+5ljD/HYa
+         9usQ==;
+        dara=google.com
+ARC-Authentication-Results: i=2; mx.google.com;
+       dkim=pass header.i=@cefla.onmicrosoft.com header.s=selector2-cefla-onmicrosoft-com header.b=VOyQQrIc;
+       arc=pass (i=1 spf=pass spfdomain=cefla.it dkim=pass dkdomain=cefla.it dmarc=pass fromdomain=cefla.it);
+       spf=pass (google.com: domain of davide.seller@cefla.it designates 2a01:111:f403:c201::d as permitted sender) smtp.mailfrom=davide.seller@cefla.it;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=cefla.it
+Received: from AM0PR07CU002.outbound.protection.outlook.com (mail-am0pr07cu00205.outbound.protection.outlook.com. [2a01:111:f403:c201::d])
+        by mx.google.com with ESMTPS id d9443c01a7336-2b27473595dsi115225305ad.33.2026.04.03.04.43.54
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Fri, 03 Apr 2026 04:43:54 -0700 (PDT)
+Received-SPF: pass (google.com: domain of davide.seller@cefla.it designates 2a01:111:f403:c201::d as permitted sender) client-ip=2a01:111:f403:c201::d;
+ARC-Seal: i=1; a=rsa-sha256; s=arcselector10001; d=microsoft.com; cv=none;
+ b=xxsZKXH6qbQqelw3Vxctowk4jJcmEwVMBbC5FZ28wRcVVHcjadtb0XYgqtL6dSKAdLYOO0/pS2cBZr2bIo3gz/cFnX+pjWnvIUpp1IgD1IJKYBrcVSsbzAe9W7Iu8s3P+Z8aFYnuYOarrAKIvBct6tpmN5YleFjBvlOCjzZrF2Z5AqrIYAz0R9WR03E32BALQXZg+chtY1fxSVpB3c7oydbahmpVHW3lh7G8OZDA6TQD7VgsOHM6GL+ShVK1a+WvilGu1ANKwNwA/+FI2SjfZhcAtn3t5cBQkwiilA6pcZhu8bB5THeCqmog5rY/JeHiUlTpB9Y2VFq8WyZEknWi6A==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector10001;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=hsJp+eLoWVwwsXalq0nDC/Lhp2ADFbdXTw3nHgmXFR0=;
+ b=MMDUSGN98IWPN3X0SppNmuhyJ/rwVVXv76ic2Xwt9Pnt1hRokvASxYjsAjRmE9i4PwI9dIX3a06kM/Uyn4c2ogd45pcenqNCd3ARjHnNoMVe5fctSwcbY11LXQg3QpQGln5ObJkqA88TGQd+w+BGyA4IxmZ6IxZy9c4d2gAZVZHdi4FJ1z8RySaV2aDfc8ghocquYnkYaoKPEbTFuwrWBaqBp/2R/ihN5qoSNFQG/qvfOyJsRTamSmdyOyaCVwXssPVd6Migj7yQ++4wyitGZN4ssMAGOLgox6AYPgDm7Mgu9Gji3GcdcCyARgUhZB4FyzrRa80VQGEpsE9kja4KAA==
+ARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=pass
+ smtp.mailfrom=cefla.it; dmarc=pass action=none header.from=cefla.it;
+ dkim=pass header.d=cefla.it; arc=none
+Received: from PR3PR01MB8019.eurprd01.prod.exchangelabs.com
+ (2603:10a6:102:176::15) by VI1PR01MB6685.eurprd01.prod.exchangelabs.com
+ (2603:10a6:800:179::10) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.9769.18; Fri, 3 Apr
+ 2026 11:43:50 +0000
+Received: from PR3PR01MB8019.eurprd01.prod.exchangelabs.com
+ ([fe80::a53f:8269:e3da:d4b0]) by PR3PR01MB8019.eurprd01.prod.exchangelabs.com
+ ([fe80::a53f:8269:e3da:d4b0%5]) with mapi id 15.20.9769.018; Fri, 3 Apr 2026
+ 11:43:50 +0000
+From: Seller Davide <davide.seller@cefla.it>
+To: Gianluca Pitti <gianluca.pitti@lutech.it>, "Help Desk, Onsite"
+	<onsite.ext@cefla.it>
+CC: "teamsecurity@cefla.it" <teamsecurity@cefla.it>, Sgubbi Giorgia
+	<giorgia.sgubbi@cefla.it>
+Subject: RE: Cefla - Neurons + VNC
+Thread-Topic: Cefla - Neurons + VNC
+Thread-Index: AQHcwqz5sCow94j0sUuxW2kED/E8WLXNOEwQ
+Date: Fri, 3 Apr 2026 11:43:50 +0000
+Message-ID: <PR3PR01MB8019F4DDA0FEBB6B91204772905EA@PR3PR01MB8019.eurprd01.prod.exchangelabs.com>
+References: <PRAP190MB17861FE2FD471137EB4C4CB68E51A@PRAP190MB1786.EURP190.PROD.OUTLOOK.COM>
+In-Reply-To: <PRAP190MB17861FE2FD471137EB4C4CB68E51A@PRAP190MB1786.EURP190.PROD.OUTLOOK.COM>
+Accept-Language: it-IT, en-US
+Content-Language: en-US
+X-MS-Has-Attach: yes
+X-MS-TNEF-Correlator:
+msip_labels:
+x-ms-traffictypediagnostic: PR3PR01MB8019:EE_|VI1PR01MB6685:EE_|AMS0EPF0000019C:EE_|GVXPR01MB10944:EE_|DBAPR01MB6920:EE_
+X-MS-Office365-Filtering-Correlation-Id: 79658bff-0979-4a15-cc21-08de91764b59
+X-Microsoft-Antispam-Untrusted: BCL:0;ARA:13230040|376014|6049299003|366016|56012099003|18002099003|8096899003|13003099007|4013099003|22082099003|41050700001;
+X-Microsoft-Antispam-Message-Info-Original: cjJfu6JfRPc7em6IiCG2DZcYRRYZN6tEaOWIlq61oq+OhtDPCgli++wpJpDph6saardU+CYnN+sbSC8cYtpOk9B6JDc0wHNsU9vVwq1wMBJt7XFXMIr4YTqXRbgo1edvOuTNHJitstgGhVU/xlasaUcTUQ7FAlfTcmE5vPKXsBwPozCILfr4wVyMHWSgFcgUngAy/jobzJhT1YA0P8jkcDSvpMGfIYlu3Tu13moUNOSkmCPYBx2vu+r+zgxRiwgj7ocrq2WJ2RwYCAxEpIb1DdjvjHyYsxJNG+CAA7lB7IADuMPnmwzUcb0INQ/DXUuSN1TUqBOZyOpyrQzXbaEwVihuHlUsUexaceJLEGEJdk8WiWBTP68Ok+k1iSozbSyUaDgAB1VJ1amm8yPNVo9SO7q9zAHz5PpXnD+aESYYEL+gWGv2Uru+szTLsU1CZk4POZ8h84t4mWcqWYZNNqnZOcNWv3Rd2/6K7wWj45p9IAydI1Y62LEJR1EA/OnJIDAaD4PtHRWHFLlEhNef4XBBgPNv/1ZTrrCXNTgjFCAGkQyGkCesfjrmwmr97XGICjRLntXtlxEVXsCE96klxGo8ztnqJg3el8fAQ+IXJik0NvQAdAfWl79k/3dir3zYBdqxvQBOA+cKiZARigq+h0cXI/zAzqQjDY6TPt1Xh/Hx+lYVMM2wPf4zsjBt910K/T030pPPiDgYBqnCufeK+nqgVqDkqJ+O1M8jogXDAnEZDBI=
+X-Forefront-Antispam-Report-Untrusted: CIP:255.255.255.255;CTRY:;LANG:it;SCL:1;SRV:;IPV:NLI;SFV:NSPM;H:PR3PR01MB8019.eurprd01.prod.exchangelabs.com;PTR:;CAT:NONE;SFS:(13230040)(376014)(6049299003)(366016)(56012099003)(18002099003)(8096899003)(13003099007)(4013099003)(22082099003)(41050700001);DIR:INT;
+Content-Type: multipart/related;
+	boundary="_005_PR3PR01MB8019F4DDA0FEBB6B91204772905EAPR3PR01MB8019eurp_";
+	type="multipart/alternative"
+X-Exchange-RoutingPolicyChecked: WUQV+/sQZd5TC6bGFNzVA19TOZcstomJRjt9Rixy5yksaIfz0SsuM6cv/luSS7e3bnRvkyZXX4ui7GDNE6ExFjs6yic+KHUqxP6s6HmFiS+rjxYgDujyG1wFMXVlCUmvYkYW9fZGi+m09DP2ysdJDBhPkjTvzarFj+9mThDrR62zAtR5x5F/Rb+eHkHzDJxN+ZQViToR5ajKBycTMb/2fxeIxlLl8x62NLJ6hnX1DYa+nEFI/lNJfOXCkjgUcLO6K96+4tyUHLWp2hONERVpI8Pc/mD3vrXN21hBJMI7xE1cWz1hQf5WM1hra4hLnctgXBulP3flNvP5H62sDCSj7g==
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: VI1PR01MB6685
+X-Original-Sender: davide.seller@cefla.it
+X-Original-Authentication-Results: mx.google.com;       dkim=pass
+ header.i=@cefla.onmicrosoft.com header.s=selector2-cefla-onmicrosoft-com
+ header.b=VOyQQrIc;       arc=pass (i=1 spf=pass spfdomain=cefla.it dkim=pass
+ dkdomain=cefla.it dmarc=pass fromdomain=cefla.it);       spf=pass
+ (google.com: domain of davide.seller@cefla.it designates 2a01:111:f403:c201::d
+ as permitted sender) smtp.mailfrom=davide.seller@cefla.it;       dmarc=pass
+ (p=REJECT sp=REJECT dis=NONE) header.from=cefla.it
+Precedence: list
+Mailing-list: list TeamSecurity@cefla.it; contact TeamSecurity+owners@cefla.it
+List-ID: <TeamSecurity.cefla.it>
+X-Spam-Checked-In-Group: TeamSecurity@cefla.it
+X-Google-Group-Id: 573616508135
+List-Post: <https://groups.google.com/a/cefla.it/group/TeamSecurity/post>, <mailto:TeamSecurity@cefla.it>
+List-Help: <https://support.google.com/a/cefla.it/bin/topic.py?topic=25838>, <mailto:TeamSecurity+help@cefla.it>
+List-Archive: <https://groups.google.com/a/cefla.it/group/TeamSecurity/>
+List-Unsubscribe: <mailto:googlegroups-manage+573616508135+unsubscribe@googlegroups.com>,
+ <https://groups.google.com/a/cefla.it/group/TeamSecurity/subscribe>
+X-Gm-Original-To: eugeniomaria.derosa.ext@cefla.it
+X-MS-Exchange-Organization-ExpirationStartTime: 03 Apr 2026 11:43:58.9533
+ (UTC)
+X-MS-Exchange-Organization-ExpirationStartTimeReason: OriginalSubmit
+X-MS-Exchange-Organization-ExpirationInterval: 1:00:00:00.0000000
+X-MS-Exchange-Organization-ExpirationIntervalReason: OriginalSubmit
+X-MS-Exchange-Organization-Network-Message-Id: 79658bff-0979-4a15-cc21-08de91764b59
+X-EOPAttributedMessage: 0
+X-EOPTenantAttributedMessage: f602a280-2b4d-4b52-b0f3-fac61b324e55:0
+X-MS-Exchange-Organization-MessageDirectionality: Incoming
+X-MS-Exchange-Transport-CrossTenantHeadersStripped: AMS0EPF0000019C.eurprd05.prod.outlook.com
+X-MS-PublicTrafficType: Email
+X-MS-Exchange-Organization-AuthSource: AMS0EPF0000019C.eurprd05.prod.outlook.com
+X-MS-Exchange-Organization-AuthAs: Anonymous
+X-MS-Office365-Filtering-Correlation-Id-Prvs: 49e66f29-c70f-4f2d-9532-08de9176466e
+X-MS-Exchange-AtpMessageProperties: SA|SL
+X-MS-Exchange-Organization-SCL: 1
+X-Microsoft-Antispam: BCL:0;ARA:13230040|7149299003|4022899009|35042699022|43022699015|6049299003|3089299003|55112099003|13003099007|4053099003|4076899003|8096899003|22082099003|18002099003|19002099003|21082099003|56012099003|7112999005;
+X-Forefront-Antispam-Report: CIP:209.85.128.71;CTRY:US;LANG:it;SCL:1;SRV:;IPV:NLI;SFV:NSPM;H:mail-wm1-f71.google.com;PTR:mail-wm1-f71.google.com;CAT:NONE;SFS:(13230040)(7149299003)(4022899009)(35042699022)(43022699015)(6049299003)(3089299003)(55112099003)(13003099007)(4053099003)(4076899003)(8096899003)(22082099003)(18002099003)(19002099003)(21082099003)(56012099003)(7112999005);DIR:INB;
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 03 Apr 2026 11:43:58.9269
+ (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: 79658bff-0979-4a15-cc21-08de91764b59
+X-MS-Exchange-CrossTenant-Id: f602a280-2b4d-4b52-b0f3-fac61b324e55
+X-MS-Exchange-CrossTenant-AuthSource: AMS0EPF0000019C.eurprd05.prod.outlook.com
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: Internet
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: GVXPR01MB10944
+X-MS-Exchange-Transport-EndToEndLatency: 00:00:07.3918463
+X-MS-Exchange-Processed-By-BccFoldering: 15.20.9769.018
+X-Microsoft-Antispam-Mailbox-Delivery:
+	ucf:0;jmr:0;auth:0;dest:I;ENG:(910005)(944490095)(944506478)(944626604)(920097)(930201)(20251009189)(140003);
+X-Microsoft-Antispam-Message-Info:
+	=?Windows-1252?Q?XdxX9ODsv509iGatQsPfI4VWxf2BrUNMu+i8KLJDqWQgt95BkK/6wSzz?=
+ =?Windows-1252?Q?01MPl5VwAKnHxHBwX3HWWDwWByGRDqTRBobA2ryZFCmqOfDkSyZI//5A?=
+ =?Windows-1252?Q?RzWH/ZCObifUSqJsLnDtk7mWs9I66wrI4cRJdAkbJZwi0KzUFjEHzzgG?=
+ =?Windows-1252?Q?j4a62de9kMOwLbAllZgDjvqEwK7mKuiOhviCWghQnuxpqUt45yesnEHJ?=
+ =?Windows-1252?Q?DDdfW7ZMK2odPreT4VoioV+KCNdF3TGTjNi4ajqLkd5xV+PXMn8w1p8e?=
+ =?Windows-1252?Q?91ijwZsIqEzEqYK4iekFKFPbTcirfqE8rUnOgFaB8jyJiUOgmG+i2Cbr?=
+ =?Windows-1252?Q?J5NGsRDHlIlrtjBLCyKLUQKcTsl4L/L1qDreyR8+WOyV4dAq1f+H5xbG?=
+ =?Windows-1252?Q?+VgDboP7g0mmOVOMOeuZxh6N0yqF+J3HgJksGewsFDBi119wCjcsJBxD?=
+ =?Windows-1252?Q?ZQaXxaJrA/H/RXlAvNvLQxLY6sI3xbrC2HDVh6cT6Y9ivKP+HmCxqfUf?=
+ =?Windows-1252?Q?ihBDHo+bbKSwpZolIlHwkTjAdKH0jbK1w9/eqPmAgRK1aL2jKU8Hbf/B?=
+ =?Windows-1252?Q?5opuhWE8x2kvFP2KOHmqQiBdZQIrjpxPai4Sw8puGbfJ89DU6kPqQyc6?=
+ =?Windows-1252?Q?/qkkYGekfZCb7PXVRbLnhS8rvy8RXomKF1GO2/eM3qMnlsnIR+V9yeON?=
+ =?Windows-1252?Q?B/27CXPWIj0r0rTGOUcLqvKrzFz4SqBtVMPQIxp27E5pM2TO60ufubZb?=
+ =?Windows-1252?Q?m9PxEUGP76PaE6TGVR/haxoSTFvwkTLYpZt0buycWQ/LKQXOz0EYBYda?=
+ =?Windows-1252?Q?mzzL8ropdJ4VwBiWegQv1czPBXw2enrbZNmeGro1el9Ciae5fBQ3y7a2?=
+ =?Windows-1252?Q?I+K1greXso4mL1mlN43oy4m/ZYe+AITd1vJG/98HcEYLTWxzBGaZ9taW?=
+ =?Windows-1252?Q?mpyIaYDvpcveZw4FDKiV9Q0/63CUsRIPboN2gsPDohOavvT8hwijtPAE?=
+ =?Windows-1252?Q?NM9dBER319f+Y4P5/e/uX+lLrpIFzjbPx0ApXTHQNLVdU0v9eOa7zQAp?=
+ =?Windows-1252?Q?of4GMTzx7UDXAKrP07FwERacxp05yrD3G/4Mudd/ZwYaL+Bxm52TTDvq?=
+ =?Windows-1252?Q?rpWKjgyU0kT9N0uNyjhYI5S5+QeBVVQLiHsL1NZqeYPTigNl+mRtR9+R?=
+ =?Windows-1252?Q?PyuNYInV+S8C3iWZIE/NA6opAhNyWYh97r2VuOZgQX/Ljo4E6jWxSkjq?=
+ =?Windows-1252?Q?opyKjLyIQjme1TW14n5vOJuRu4Levqcn+HwApDlt640d9Epag2AFA2BW?=
+ =?Windows-1252?Q?JW2YXKydWuHNPzv5rNkn5sUV0Oj/Mf3KLjNilU949GE6fXThzYDNuwL2?=
+ =?Windows-1252?Q?M3Gy2N9PJhekRt5qEiJYxsKVafj0Mdytdx8udWgWM4vdu656Tp18Qazd?=
+ =?Windows-1252?Q?hST87oRNCQoERTfMtbi3WpZ5P9ZqnK0wccqLoLmcW49TTYMtyXBozW2w?=
+ =?Windows-1252?Q?uZzSI6sAn4aw9MKzdO4xSGVj3sI7tNa4LWUVH3R9OwqhoYrNCOhGneNg?=
+ =?Windows-1252?Q?3cYRWxArrnvRqltoCD4PADmabu8ActM6uEjLFZ5HFW8jJ+wPZGPHIczM?=
+ =?Windows-1252?Q?bo3YHIBTwPWFu3HtaC+1RHNWJLxhkQyruu3sHtDtZtwB7YFUAbcJ9QXb?=
+ =?Windows-1252?Q?Ht+lEw+dH1f2TpPYbY+X1S6C+09baj+qXbCrSLX6YKFBbugPNQCkLCxq?=
+ =?Windows-1252?Q?q0EDoG8dAejI9DqvOoUe8vLEokeAXcQzSrdrT6iAguMrY5MTJ+xBsPuQ?=
+ =?Windows-1252?Q?UPGUaEUFyedUnA288OJGnybTteHguU6OSqzNyDtK4+okLrPRF9nDd9vx?=
+ =?Windows-1252?Q?/S3mCeA1TpPf4ISOxRj6trc2FSArcfzxMlSsM/+JhHJe2aeBQOD0LAYu?=
+ =?Windows-1252?Q?kgIWgl7f2sbZ5J3/iI91lJbIGkQmeSHZoyJt0aQeehKQw30geg8b/BjK?=
+ =?Windows-1252?Q?vuIyR1uaKIcoB7rXCrKpnyzro6xO1ECPi+y70eOvnzKrE0zwMhYKncMK?=
+ =?Windows-1252?Q?F8pTvBo5gHp0L2Wigx+6iXV7Y7vNWL8nZVuhkwIoqm27a3xn+oiUjF8Z?=
+ =?Windows-1252?Q?sAgNoiyvXRwzGusTUFR2wr+UR3UHpwFpGFwYU0cDVPO3yRNIH5igmeUe?=
+ =?Windows-1252?Q?d8CdLW/5g6xr02nKvwiUigrLiD1b7z3fZwpKTY1Xm93o0f0R3vqVJg?=
+ =?Windows-1252?Q?=3D=3D?=
+MIME-Version: 1.0
+
+--_005_PR3PR01MB8019F4DDA0FEBB6B91204772905EAPR3PR01MB8019eurp_
+Content-Type: multipart/alternative;
+	boundary="_000_PR3PR01MB8019F4DDA0FEBB6B91204772905EAPR3PR01MB8019eurp_"
+
+--_000_PR3PR01MB8019F4DDA0FEBB6B91204772905EAPR3PR01MB8019eurp_
+Content-Type: text/plain; charset="iso-8859-1"
+Content-Transfer-Encoding: quoted-printable
+
+Ciao Gialunca,
+ok grazie per il feedback.
+
+Nessuna problematica all'uso di teamviwer, vi chiederei di usare in primis =
+Neurons anche per testarlo (soprattutto per connessioni dentro Cefla).
+
+ciao
+
+
+[cid:image001.png@01DCC36F.E6BCEEC0]
+Davide Seller
+IT SYSTEM ANALYST
+Mob. +393384691044
+www.cefla.com<http://www.cefla.com/>
+Via Bicocca, 14/c 40026 - Imola (BO) Italy
+
+
+From: Gianluca Pitti <gianluca.pitti@lutech.it>
+Sent: gioved=EC 2 aprile 2026 16:51
+To: Seller Davide <davide.seller@cefla.it>; Help Desk, Onsite <onsite.ext@c=
+efla.it>
+Cc: teamsecurity@cefla.it; Sgubbi Giorgia <giorgia.sgubbi@cefla.it>
+Subject: Cefla - Neurons + VNC
+
+Ciao ragazzi,
+  vi chiedo di non installare e non utilizzare VNC su tutta la flotta di PC=
+ Cefla, il nuovo software da utilizzare sar=E0 "Neurons" o TeamViewer (soft=
+ware che gi=E0 utilizziamo).
+
+
+Vi riporto quanto discusso con Seller:
+
+Sui pc utenti non ci sar=E0 nulla di differente da Ivanti, richiesta di col=
+legamento + relativo ok lato user, per accettare il collegamento/controllo.
+
+Lato PC collaudo non servir=E0 ok lato utente --> avvertiamo sempre i respo=
+nsabili se necessitiamo di collegarci su queste macchine prima di eseguire =
+il collegamento.
+
+
+
+Agent Ivanti deve comunque essere installato, e in Ivanti popolati i soliti=
+ campi custum.
+
+
+@Davide Seller<mailto:davide.seller@cefla.it> Condivido con te due tematich=
+e:
+
+
+  1.  Naldi utilizza VNC per gestire i PC che sta installando, proviamo ad =
+utilizzare RDP di MS e capiamo se risulta pratico nell'utilizzo quotidiano,=
+ in caso contrario capiremo assieme come procedere.
+
+  1.  Provando ad utilizzare Neurons abbiamo notato alcuni difetti; una len=
+tezza anomala, non viene richiesto all'utente "l'ok" al collegamento remoto=
+, se ci sono problematiche di latenza sulla connessione, anche lievi, la co=
+nnessione tende a saltare.
+Per questo motivo spesso viene preferito l'utilizzo di TeamViewer.
+
+Se riscontrate altre anomalie sull'utilizzo di Neurons aggiorniamo questo t=
+hread in modo da essere tutti allineati.
+
+Grazie mille.
+
+Gianluca Pitti
+Service Manager, S&N Division
+Gianluca.Pitti@Lutech.it<mailto:Gianluca.Pitti@Lutech.it>
++39 393 5499058 * +39 0521 914828
+
+[CDM]
+
+
+WWW.GRUPPOCDM.IT<http://www.gruppocdm.it/>
+Lutech CDM S.p.A.  *  Largo Cacciari 1 A/B 43122 Parma PR, Italia
+
+P.IVA 01555050341 - Parma - R.E.A. n. 162419
+
+Sottoposta all'attivit=E0 di direzione e coordinamento di Lutech S.p.A.
+
+Il contenuto di questo messaggio e-mail e di ogni eventuale allegato =E8 st=
+rettamente confidenziale e indirizzato esclusivamente al destinatario indic=
+ato. Tutte le informazioni contenute sono soggette ad obbligo di riservatez=
+za ai sensi del Regolamento UE 2016/679 GDPR e del D.Lgs 196/2003 e sm. Il =
+trattamento non autorizzato del contenuto trasmesso e/o allegato dal mitten=
+te =E8 vietato. In caso di erronea ricezione il destinatario =E8 pregato di=
+ contattare immediatamente il mittente e cancellare al pi=F9 presto il mess=
+aggio. Grazie.
+
+The contents and any attachments of this e-mail are strictly confidential a=
+nd addressed exclusively to the designated addressee. Any information in th=
+is e-mail is subject to an obligation of confidentiality in accordance with=
+ EU regulation 2016/679 and D.Lgs. 196/2003. Unauthorized treatment of the =
+content and/or any attachments of this e-mail is forbidden. In the event of=
+ incorrect reception the recipient must immediately contact the sender and =
+delete as soon as possible the e-mail. Thank you.
+CDM Tecnoconsulting SpA  - P.IVA 01555050341 - Parma - REA 162419
+
+
+--_000_PR3PR01MB8019F4DDA0FEBB6B91204772905EAPR3PR01MB8019eurp_
+Content-Type: text/html; charset="iso-8859-1"
+Content-Transfer-Encoding: quoted-printable
+
+<html><head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Diso-8859-=
+1">
+<meta name=3D"Generator" content=3D"Microsoft Word 15 (filtered medium)">
+<!--[if !mso]><style>v\:* {behavior:url(#default#VML);}
+o\:* {behavior:url(#default#VML);}
+w\:* {behavior:url(#default#VML);}
+.shape {behavior:url(#default#VML);}
+</style><![endif]--><style><!--
+/* Font Definitions */
+@font-face
+	{font-family:Wingdings;
+	panose-1:5 0 0 0 0 0 0 0 0 0;}
+@font-face
+	{font-family:"Cambria Math";
+	panose-1:2 4 5 3 5 4 6 3 2 4;}
+@font-face
+	{font-family:Calibri;
+	panose-1:2 15 5 2 2 2 4 3 2 4;}
+@font-face
+	{font-family:Verdana;
+	panose-1:2 11 6 4 3 5 4 4 2 4;}
+@font-face
+	{font-family:Aptos;}
+@font-face
+	{font-family:Roboto;}
+@font-face
+	{font-family:"Century Gothic";
+	panose-1:2 11 5 2 2 2 2 2 2 4;}
+/* Style Definitions */
+p.MsoNormal, li.MsoNormal, div.MsoNormal
+	{margin:0cm;
+	font-size:12.0pt;
+	font-family:"Aptos",sans-serif;}
+a:link, span.MsoHyperlink
+	{mso-style-priority:99;
+	color:blue;
+	text-decoration:underline;}
+p.elementtoproof, li.elementtoproof, div.elementtoproof
+	{mso-style-name:elementtoproof;
+	margin:0cm;
+	font-size:12.0pt;
+	font-family:"Aptos",sans-serif;}
+span.EmailStyle22
+	{mso-style-type:personal-reply;
+	font-family:"Aptos",sans-serif;
+	color:windowtext;}
+.MsoChpDefault
+	{mso-style-type:export-only;
+	font-size:10.0pt;
+	mso-ligatures:none;}
+@page WordSection1
+	{size:612.0pt 792.0pt;
+	margin:70.85pt 2.0cm 2.0cm 2.0cm;}
+div.WordSection1
+	{page:WordSection1;}
+/* List Definitions */
+@list l0
+	{mso-list-id:591402160;
+	mso-list-template-ids:-851551628;}
+ol
+	{margin-bottom:0cm;}
+ul
+	{margin-bottom:0cm;}
+--></style><!--[if gte mso 9]><xml>
+<o:shapedefaults v:ext=3D"edit" spidmax=3D"1026" />
+</xml><![endif]--><!--[if gte mso 9]><xml>
+<o:shapelayout v:ext=3D"edit">
+<o:idmap v:ext=3D"edit" data=3D"1" />
+</o:shapelayout></xml><![endif]-->
+</head>
+<body lang=3D"IT" link=3D"blue" vlink=3D"purple" style=3D"word-wrap:break-w=
+ord">
+<div class=3D"WordSection1">
+<p class=3D"MsoNormal"><span style=3D"mso-fareast-language:EN-US">Ciao Gial=
+unca,<o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span style=3D"mso-fareast-language:EN-US">ok grazie=
+ per il feedback.<o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span style=3D"mso-fareast-language:EN-US"><o:p>&nbs=
+p;</o:p></span></p>
+<p class=3D"MsoNormal"><span style=3D"mso-fareast-language:EN-US">Nessuna p=
+roblematica all&#8217;uso di teamviwer, vi chiederei di usare in primis Neu=
+rons anche per testarlo (soprattutto per connessioni dentro Cefla).<o:p></o=
+:p></span></p>
+<p class=3D"MsoNormal"><span style=3D"mso-fareast-language:EN-US"><o:p>&nbs=
+p;</o:p></span></p>
+<p class=3D"MsoNormal"><span style=3D"mso-fareast-language:EN-US">ciao <o:p=
+></o:p></span></p>
+<p class=3D"MsoNormal"><span style=3D"mso-fareast-language:EN-US"><o:p>&nbs=
+p;</o:p></span></p>
+<div>
+<p class=3D"MsoNormal"><o:p>&nbsp;</o:p></p>
+<table class=3D"MsoNormalTable" border=3D"0" cellspacing=3D"0" cellpadding=
+=3D"0" style=3D"background:white;border-collapse:collapse">
+<tbody>
+<tr style=3D"height:66.75pt">
+<td valign=3D"top" style=3D"padding:5.0pt 5.0pt 5.0pt 5.0pt;height:66.75pt"=
+>
+<p class=3D"MsoNormal"><b><span style=3D"font-size:11.0pt;font-family:&quot=
+;Arial&quot;,sans-serif;color:black;border:none windowtext 1.0pt;padding:0c=
+m"><img width=3D"95" height=3D"84" style=3D"width:.993in;height:.875in" id=
+=3D"Picture_x0020_481196572" src=3D"cid:image001.png@01DCC36F.E6BCEEC0"></s=
+pan></b><span style=3D"font-family:&quot;Arial&quot;,sans-serif;color:#2222=
+22"><o:p></o:p></span></p>
+</td>
+<td valign=3D"top" style=3D"padding:5.0pt 5.0pt 5.0pt 5.0pt;height:66.75pt"=
+>
+<p class=3D"MsoNormal"><b><span lang=3D"EN-US" style=3D"font-size:10.0pt;fo=
+nt-family:Roboto;color:#212121">Davide Seller</span></b><span lang=3D"EN-US=
+" style=3D"font-family:&quot;Arial&quot;,sans-serif;color:#222222"><o:p></o=
+:p></span></p>
+<p class=3D"MsoNormal"><span lang=3D"EN-US" style=3D"font-size:9.0pt;font-f=
+amily:&quot;Verdana&quot;,sans-serif;color:#585858">IT SYSTEM ANALYST</span=
+><span lang=3D"EN-US" style=3D"font-family:&quot;Arial&quot;,sans-serif;col=
+or:#222222"><o:p></o:p></span></p>
+<p class=3D"MsoNormal"><span lang=3D"EN-US" style=3D"font-size:10.0pt;font-=
+family:Roboto;color:#212121">Mob. +393384691044</span><span lang=3D"EN-US" =
+style=3D"font-family:&quot;Arial&quot;,sans-serif;color:#222222"><o:p></o:p=
+></span></p>
+<p class=3D"MsoNormal"><span style=3D"font-family:&quot;Arial&quot;,sans-se=
+rif;color:#222222"><a href=3D"http://www.cefla.com/" target=3D"_blank"><spa=
+n style=3D"font-size:10.0pt;font-family:Roboto;color:black">www.cefla.com</=
+span></a></span><span style=3D"font-size:10.0pt;font-family:Roboto;color:#2=
+12121">&nbsp;</span><span style=3D"font-family:&quot;Arial&quot;,sans-serif=
+;color:#222222"><o:p></o:p></span></p>
+</td>
+</tr>
+<tr style=3D"height:21.0pt">
+<td colspan=3D"2" valign=3D"top" style=3D"padding:5.0pt 5.0pt 5.0pt 5.0pt;h=
+eight:21.0pt">
+<p class=3D"MsoNormal"><span style=3D"font-size:8.0pt;font-family:Roboto;co=
+lor:#212121">Via Bicocca, 14/c 40026 - Imola (BO) Italy</span><span style=
+=3D"font-family:&quot;Arial&quot;,sans-serif;color:#222222"><o:p></o:p></sp=
+an></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p class=3D"MsoNormal"><span style=3D"mso-ligatures:standardcontextual"><o:=
+p>&nbsp;</o:p></span></p>
+</div>
+<p class=3D"MsoNormal"><span style=3D"mso-fareast-language:EN-US"><o:p>&nbs=
+p;</o:p></span></p>
+<div>
+<div style=3D"border:none;border-top:solid #E1E1E1 1.0pt;padding:3.0pt 0cm =
+0cm 0cm">
+<p class=3D"MsoNormal"><b><span lang=3D"EN-US" style=3D"font-size:11.0pt;fo=
+nt-family:&quot;Calibri&quot;,sans-serif">From:</span></b><span lang=3D"EN-=
+US" style=3D"font-size:11.0pt;font-family:&quot;Calibri&quot;,sans-serif"> =
+Gianluca Pitti &lt;gianluca.pitti@lutech.it&gt;
+<br>
+<b>Sent:</b> gioved=EC 2 aprile 2026 16:51<br>
+<b>To:</b> Seller Davide &lt;davide.seller@cefla.it&gt;; Help Desk, Onsite =
+&lt;onsite.ext@cefla.it&gt;<br>
+<b>Cc:</b> teamsecurity@cefla.it; Sgubbi Giorgia &lt;giorgia.sgubbi@cefla.i=
+t&gt;<br>
+<b>Subject:</b> Cefla - Neurons + VNC<o:p></o:p></span></p>
+</div>
+</div>
+<p class=3D"MsoNormal"><o:p>&nbsp;</o:p></p>
+<div>
+<p class=3D"MsoNormal"><span style=3D"color:black">Ciao ragazzi,<o:p></o:p>=
+</span></p>
+</div>
+<div>
+<p class=3D"MsoNormal"><span style=3D"color:black">&nbsp; vi chiedo di non =
+installare e non utilizzare VNC su tutta la flotta di PC Cefla, il nuovo so=
+ftware da utilizzare sar=E0 &quot;Neurons&quot; o TeamViewer (software che =
+gi=E0 utilizziamo).<o:p></o:p></span></p>
+</div>
+<div>
+<p class=3D"MsoNormal"><span style=3D"color:black"><o:p>&nbsp;</o:p></span>=
+</p>
+</div>
+<p class=3D"elementtoproof" style=3D"background:white"><span style=3D"color=
+:black">Vi riporto quanto discusso con Seller:</span><o:p></o:p></p>
+<p class=3D"MsoNormal" style=3D"background:white"><span style=3D"color:blac=
+k"><o:p>&nbsp;</o:p></span></p>
+<p class=3D"MsoNormal" style=3D"background:white"><span style=3D"color:blac=
+k">Sui pc utenti non ci sar=E0 nulla di differente da Ivanti, richiesta di =
+collegamento + relativo ok lato user, per accettare il collegamento/control=
+lo.<o:p></o:p></span></p>
+<p class=3D"elementtoproof" style=3D"background:white"><span style=3D"color=
+:black">Lato PC collaudo non servir=E0 ok lato utente
+</span><span style=3D"font-family:Wingdings;color:black">=E0</span><span st=
+yle=3D"color:black">&nbsp;<i><u>avvertiamo sempre i responsabili se necessi=
+tiamo di collegarci su queste macchine prima di eseguire il collegamento.</=
+u></i></span><o:p></o:p></p>
+<p class=3D"elementtoproof" style=3D"background:white"><o:p>&nbsp;</o:p></p=
+>
+<p class=3D"elementtoproof" style=3D"background:white"><span style=3D"color=
+:black">Agent Ivanti deve comunque essere installato, e in Ivanti popolati =
+i soliti campi custum.</span><o:p></o:p></p>
+<div>
+<p class=3D"MsoNormal"><span style=3D"color:black"><o:p>&nbsp;</o:p></span>=
+</p>
+</div>
+<div>
+<p class=3D"MsoNormal"><span style=3D"color:black"><o:p>&nbsp;</o:p></span>=
+</p>
+</div>
+<div>
+<p class=3D"MsoNormal"><span style=3D"color:black"><a id=3D"OWAAM210683" hr=
+ef=3D"mailto:davide.seller@cefla.it"><span style=3D"font-family:&quot;Aptos=
+&quot;,sans-serif;text-decoration:none">@Davide Seller</span></a>&nbsp;Cond=
+ivido con te due tematiche:<o:p></o:p></span></p>
+</div>
+<div>
+<p class=3D"MsoNormal"><span style=3D"color:black"><o:p>&nbsp;</o:p></span>=
+</p>
+</div>
+<div>
+<ol start=3D"1" type=3D"1">
+<li class=3D"MsoNormal" style=3D"color:black;mso-margin-top-alt:auto;mso-ma=
+rgin-bottom-alt:auto;mso-list:l0 level1 lfo1">
+Naldi utilizza VNC per gestire i PC che sta installando, proviamo ad utiliz=
+zare RDP di MS e capiamo se risulta pratico nell'utilizzo quotidiano, in ca=
+so contrario capiremo assieme come procedere.<o:p></o:p></li></ol>
+</div>
+<div>
+<ol start=3D"2" type=3D"1">
+<li class=3D"MsoNormal" style=3D"color:black;mso-margin-top-alt:auto;mso-ma=
+rgin-bottom-alt:auto;mso-list:l0 level1 lfo1">
+Provando ad utilizzare Neurons abbiamo notato alcuni difetti; una lentezza =
+anomala, non viene richiesto all'utente &quot;l'ok&quot; al collegamento re=
+moto, se ci sono problematiche di latenza sulla connessione, anche lievi, l=
+a connessione tende a saltare.<o:p></o:p></li></ol>
+</div>
+<div>
+<p class=3D"MsoNormal" style=3D"mso-margin-top-alt:auto;mso-margin-bottom-a=
+lt:auto;margin-left:36.0pt">
+<span style=3D"color:black">Per questo motivo spesso viene preferito l'util=
+izzo di TeamViewer.<o:p></o:p></span></p>
+</div>
+<div>
+<p class=3D"MsoNormal"><span style=3D"color:black"><o:p>&nbsp;</o:p></span>=
+</p>
+</div>
+<div>
+<p class=3D"MsoNormal"><span style=3D"color:black">Se riscontrate altre ano=
+malie sull'utilizzo di Neurons aggiorniamo questo thread in modo da essere =
+tutti allineati.<o:p></o:p></span></p>
+</div>
+<div>
+<p class=3D"MsoNormal"><span style=3D"color:black"><o:p>&nbsp;</o:p></span>=
+</p>
+</div>
+<div>
+<p class=3D"MsoNormal"><span style=3D"color:black">Grazie mille.<o:p></o:p>=
+</span></p>
+</div>
+<div id=3D"Signature">
+<div>
+<p class=3D"MsoNormal"><span style=3D"color:black"><o:p>&nbsp;</o:p></span>=
+</p>
+</div>
+<p class=3D"MsoNormal" style=3D"background:white"><b><span style=3D"font-si=
+ze:9.0pt;font-family:&quot;Calibri&quot;,sans-serif;color:#333333;backgroun=
+d:white">Gianluca Pitti</span></b><span style=3D"font-size:9.0pt;font-famil=
+y:&quot;Calibri&quot;,sans-serif;color:#333333"><o:p></o:p></span></p>
+<p class=3D"MsoNormal" style=3D"background:white"><span style=3D"font-size:=
+9.0pt;font-family:&quot;Century Gothic&quot;,sans-serif;color:#BE0036;backg=
+round:white">Service&nbsp;Manager, S&amp;N Division</span><b><span style=3D=
+"font-size:9.0pt;font-family:&quot;Calibri&quot;,sans-serif;color:#333333;b=
+ackground:white"><br>
+</span></b><u><span style=3D"font-size:9.0pt;font-family:&quot;Calibri&quot=
+;,sans-serif;color:#954F72;background:white"><a href=3D"mailto:Gianluca.Pit=
+ti@Lutech.it">Gianluca.Pitti@Lutech.it</a></span></u><span style=3D"font-si=
+ze:9.0pt;font-family:&quot;Calibri&quot;,sans-serif;color:black;background:=
+white"><br>
+</span><span style=3D"font-size:9.0pt;font-family:&quot;Calibri&quot;,sans-=
+serif;color:#333333;background:white">+39 393 5499058
+</span><b><span style=3D"font-size:7.0pt;font-family:&quot;Calibri&quot;,sa=
+ns-serif;color:#333333;background:white">&#8226;</span></b><span style=3D"f=
+ont-size:9.0pt;font-family:&quot;Calibri&quot;,sans-serif;color:#333333;bac=
+kground:white">&nbsp;+39 0521 914828</span><o:p></o:p></p>
+<p class=3D"MsoNormal" style=3D"background:white"><span style=3D"font-size:=
+9.0pt;font-family:&quot;Calibri&quot;,sans-serif;color:#333333"><o:p>&nbsp;=
+</o:p></span></p>
+<p class=3D"MsoNormal" style=3D"background:white"><b><span style=3D"font-si=
+ze:7.0pt;font-family:&quot;Calibri&quot;,sans-serif;color:#BE0036;letter-sp=
+acing:.5pt;background:white"><img border=3D"0" width=3D"135" height=3D"36" =
+style=3D"width:1.4097in;height:.375in" id=3D"x_image_0" src=3D"cid:image002=
+.png@01DCC36F.E6BCEEC0" alt=3D"CDM"></span></b><span style=3D"font-size:7.0=
+pt;font-family:&quot;Calibri&quot;,sans-serif;color:#BE0036"><o:p></o:p></s=
+pan></p>
+<p class=3D"MsoNormal" style=3D"background:white"><span style=3D"font-size:=
+7.0pt;font-family:&quot;Calibri&quot;,sans-serif;color:#BE0036"><o:p>&nbsp;=
+</o:p></span></p>
+<p class=3D"elementtoproof" style=3D"background:white"><span style=3D"font-=
+size:7.0pt;font-family:&quot;Calibri&quot;,sans-serif;color:#954F72;letter-=
+spacing:.5pt"><a href=3D"http://www.gruppocdm.it/" target=3D"_blank" title=
+=3D"http://www.gruppocdm.it/"><b><span style=3D"color:#954F72">WWW.GRUPPOCD=
+M.IT</span></b></a></span><span style=3D"font-size:7.0pt;font-family:&quot;=
+Calibri&quot;,sans-serif;color:black;letter-spacing:.5pt"><br>
+</span><b><span style=3D"font-size:7.0pt;color:#262626;letter-spacing:.5pt"=
+>Lutech CDM S.p.A. &nbsp;&#8226;
+</span></b><b><span style=3D"font-size:7.0pt;font-family:&quot;Calibri&quot=
+;,sans-serif;color:#262626;letter-spacing:.5pt">&nbsp;Largo Cacciari 1 A/B =
+43122 Parma PR, Italia</span></b><o:p></o:p></p>
+<p class=3D"elementtoproof" style=3D"background:white"><b><span style=3D"fo=
+nt-size:7.0pt;font-family:&quot;Calibri&quot;,sans-serif;color:#262626;lett=
+er-spacing:.5pt">P.IVA 01555050341 &#8211; Parma &#8211; R.E.A. n. 162419</=
+span></b><o:p></o:p></p>
+<p class=3D"elementtoproof" style=3D"background:white"><b><span style=3D"fo=
+nt-size:7.0pt;font-family:&quot;Calibri&quot;,sans-serif;color:#262626;lett=
+er-spacing:.5pt">Sottoposta all&#8217;attivit=E0 di direzione e coordinamen=
+to di Lutech S.p.A.</span></b><o:p></o:p></p>
+<p class=3D"elementtoproof" style=3D"background:white"><span style=3D"font-=
+size:7.5pt;font-family:&quot;Calibri&quot;,sans-serif;color:#404040;backgro=
+und:white">Il contenuto di questo messaggio e-mail e di ogni eventuale alle=
+gato =E8 strettamente confidenziale e indirizzato
+ esclusivamente al destinatario indicato. Tutte le informazioni contenute s=
+ono soggette ad obbligo di riservatezza ai sensi del Regolamento UE 2016/67=
+9 GDPR e del D.Lgs 196/2003 e sm. Il trattamento non autorizzato del conten=
+uto trasmesso e/o allegato dal mittente
+ =E8 vietato. In caso di erronea ricezione il destinatario =E8 pregato di c=
+ontattare immediatamente il mittente e cancellare al pi=F9 presto il messag=
+gio. Grazie.</span><o:p></o:p></p>
+<p class=3D"elementtoproof" style=3D"background:white"><span style=3D"font-=
+size:7.5pt;font-family:&quot;Calibri&quot;,sans-serif;color:#404040;backgro=
+und:white">The contents and any attachments of this e-mail are strictly con=
+fidential and addressed exclusively to the designated
+ addressee. Any information in this e-mail is subject to an obligation of c=
+onfidentiality in accordance with EU regulation 2016/679 and D.Lgs. 196/200=
+3. Unauthorized treatment of the content and/or any attachments of this e-m=
+ail is forbidden. In the event of
+ incorrect reception the recipient must immediately contact the sender and =
+delete as soon as possible the e-mail.&nbsp;Thank you.&nbsp;<br>
+CDM Tecnoconsulting SpA&nbsp; &#8211; P.IVA 01555050341 &#8211; Parma &#821=
+1; REA 162419</span><o:p></o:p></p>
+<div>
+<p class=3D"MsoNormal"><span style=3D"color:black"><o:p>&nbsp;</o:p></span>=
+</p>
+</div>
+</div>
+</div>
+</body>
+</html>
+
+--_000_PR3PR01MB8019F4DDA0FEBB6B91204772905EAPR3PR01MB8019eurp_--
+
+--_005_PR3PR01MB8019F4DDA0FEBB6B91204772905EAPR3PR01MB8019eurp_
+Content-Type: image/png; name="image001.png"
+Content-Description: image001.png
+Content-Disposition: inline; filename="image001.png"; size=8185;
+	creation-date="Fri, 03 Apr 2026 11:43:50 GMT";
+	modification-date="Fri, 03 Apr 2026 11:43:50 GMT"
+Content-ID: <image001.png@01DCC36F.E6BCEEC0>
+Content-Transfer-Encoding: base64
+
+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
+
+--_005_PR3PR01MB8019F4DDA0FEBB6B91204772905EAPR3PR01MB8019eurp_
+Content-Type: image/png; name="image002.png"
+Content-Description: image002.png
+Content-Disposition: inline; filename="image002.png"; size=8323;
+	creation-date="Fri, 03 Apr 2026 11:43:50 GMT";
+	modification-date="Fri, 03 Apr 2026 11:43:50 GMT"
+Content-ID: <image002.png@01DCC36F.E6BCEEC0>
+Content-Transfer-Encoding: base64
+
+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
+gg==
+
+--_005_PR3PR01MB8019F4DDA0FEBB6B91204772905EAPR3PR01MB8019eurp_--

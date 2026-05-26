@@ -43,7 +43,6 @@ KNOWN_BRANDS: list[str] = [
 ]
 
 # Caratteri Unicode omoglifi → ASCII equivalente
-# (sottoinsieme rilevante per phishing; non serve un mapping completo)
 _HOMOGLYPH_MAP: dict[str, str] = {
     "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "х": "x",
     "ı": "i", "ĺ": "l", "ḷ": "l", "ó": "o", "ô": "o", "ö": "o",
@@ -64,9 +63,9 @@ def _levenshtein(a: str, b: str) -> int:
         curr = [i]
         for j, cb in enumerate(b, 1):
             curr.append(min(
-                prev[j] + 1,       # delete
-                curr[j - 1] + 1,   # insert
-                prev[j - 1] + (ca != cb),  # replace
+                prev[j] + 1,
+                curr[j - 1] + 1,
+                prev[j - 1] + (ca != cb),
             ))
         prev = curr
     return prev[-1]
@@ -91,7 +90,7 @@ def _strip_public_suffix(domain: str) -> str:
     """
     parts = domain.rstrip(".").split(".")
     if len(parts) >= 2:
-        return parts[-2]   # secondo-livello (SLD)
+        return parts[-2]
     return domain
 
 
@@ -129,7 +128,7 @@ def extract_links(body_plain: str, body_html: str) -> list[dict]:
             url = "http://" + url
         try:
             parsed = urlparse(url)
-            host   = parsed.netloc.lower().split(":")[0]   # rimuove porta
+            host   = parsed.netloc.lower().split(":")[0]
             scheme = parsed.scheme.lower()
         except Exception:
             return
@@ -222,7 +221,7 @@ def check_lookalike_domains(
 
             # Salta i match esatti (il dominio IS il brand)
             if host_norm == brand_norm or host_norm.endswith("." + brand_norm):
-                break  # stesso dominio organizzativo → non è lookalike
+                continue  # FIX: era `break`, che interrompeva il loop su tutti i brand
 
             # ── Tecnica 1: Levenshtein sull'SLD ─────────────────────────
             dist = _levenshtein(host_sld, brand_sld)
@@ -360,13 +359,11 @@ def _strip_html(html: str) -> str:
       3. Separatore '\n' tra i tag per preservare la struttura dei paragrafi.
       4. Fallback regex se BeautifulSoup non è installato: rimuove tutti i tag
          con un pattern greedy-safe e decodifica le entity HTML principali.
-         Meno preciso ma sempre meglio del testo grezzo.
 
     Perché è importante:
       Gli attaccanti inseriscono tag o commenti HTML invisibili in mezzo alle
-      parole (es. Pa<!-- x -->ypal, P<span style='display:none'>x</span>aypal)
-      per aggirare i filtri basati su stringhe. Senza stripping, BERT riceve
-      token sporchi e le regex sui link non trovano le URL reali.
+      parole (es. Pa<!-- x -->ypal) per aggirare i filtri basati su stringhe.
+      Senza stripping, BERT riceve token sporchi.
     """
     if not html or not html.strip():
         return ""
@@ -377,16 +374,12 @@ def _strip_html(html: str) -> str:
         except Exception:
             soup = BeautifulSoup(html, "html.parser")
 
-        # Rimuovi blocchi script e style — il loro contenuto non è testo leggibile
         for tag in soup(["script", "style", "head"]):
             tag.decompose()
 
-        # get_text con separatore newline per preservare la struttura dei paragrafi
         text = soup.get_text(separator="\n")
     else:
-        # Fallback regex: rimuovi tutti i tag HTML
         text = re.sub(r"<[^>]+>", " ", html)
-        # Decodifica le entity HTML più comuni
         text = (text
                 .replace("&amp;",  "&")
                 .replace("&lt;",   "<")
@@ -395,11 +388,10 @@ def _strip_html(html: str) -> str:
                 .replace("&quot;", '"')
                 .replace("&#39;",  "'"))
 
-    # Normalizza whitespace: collassa spazi multipli e righe vuote consecutive
     lines = [line.strip() for line in text.splitlines()]
-    lines = [l for l in lines if l]                      # rimuovi righe vuote
+    lines = [l for l in lines if l]
     cleaned = "\n".join(lines)
-    cleaned = re.sub(r" {2,}", " ", cleaned)             # spazi multipli → singolo
+    cleaned = re.sub(r" {2,}", " ", cleaned)
 
     return cleaned.strip()
 
@@ -407,44 +399,38 @@ def _strip_html(html: str) -> str:
 # ---------------------------------------------------------------------------
 # Received chain parser
 # ---------------------------------------------------------------------------
-# Riconosce sia IPv4 sia IPv6, rimuovendo eventuali parentesi quadre o tonde di contorno
 _IP_RE = re.compile(
-    r"(?:\[|(?<=\s\())"                         # Parentesi quadra o tonda aperta con spazio prima
-    r"([0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){1,7}|(?:::[0-9a-fA-F]{1,4}){1,7}|[0-9a-fA-F]{1,4}::|" # IPv6 standard/compresso
-    r"\d{1,3}(?:\.\d{1,3}){3})"                 # IPv4 classico
-    r"(?=\s*\)|\])"                             # Chiusura parentesi tonda o quadra
+    r"(?:\[|(?<=\s\())"
+    r"([0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){1,7}|(?:::[0-9a-fA-F]{1,4}){1,7}|[0-9a-fA-F]{1,4}::|"
+    r"\d{1,3}(?:\.\d{1,3}){3})"
+    r"(?=\s*\)|\])"
 )
-_BY_RE = re.compile(r"by\s+([\w.\-]+)", re.IGNORECASE)
+_BY_RE   = re.compile(r"by\s+([\w.\-]+)", re.IGNORECASE)
 _FROM_RE = re.compile(r"from\s+([\w.\-]+)\s*(?:\(([^)]*)\))?", re.IGNORECASE)
-_FOR_RE = re.compile(r"for\s+<([^>]+)>", re.IGNORECASE)
-_TLS_RE = re.compile(r"version=(TLS[\w.]+)\s+cipher=([\w\-]+)", re.IGNORECASE)
+_FOR_RE  = re.compile(r"for\s+<([^>]+)>", re.IGNORECASE)
+_TLS_RE  = re.compile(r"version=(TLS[\w.]+)\s+cipher=([\w\-]+)", re.IGNORECASE)
 
 
 def _parse_received_hop(raw: str) -> dict:
     hop: dict = {"raw": raw.strip()}
 
-    # Applica una pulizia iniziale per normalizzare i ritorni a capo e gli spazi multipli
     clean_raw = " ".join(raw.split())
 
     m = _FROM_RE.search(clean_raw)
     if m:
         hop["from_host"] = m.group(1)
         parenthetical = m.group(2) or ""
-        
-        # Primo tentativo: cerca l'IP all'interno delle parentesi del campo FROM
+
         ip_m = _IP_RE.search(parenthetical)
         if not ip_m:
-            # Secondo tentativo: se non è nelle parentesi, cercalo subito dopo il nome host
-            # Molto comune nei log Exchange: from host.com (IP) by...
             host_end = m.end(1)
             ip_m = _IP_RE.search(clean_raw, host_end)
-        
+
         hop["sender_ip"] = ip_m.group(1) if ip_m else None
-        
+
         parts = [p.strip() for p in parenthetical.replace("[", "").replace("]", "").replace("(", "").replace(")", "").split()]
         hop["sender_domain"] = parts[0] if parts and not parts[0][0].isdigit() and ":" not in parts[0] else None
 
-    # Se non è stato trovato un From strutturato ma è presente un IP, lo estraiamo comunque come paracadute
     if not hop.get("sender_ip"):
         fallback_ip = _IP_RE.search(clean_raw)
         hop["sender_ip"] = fallback_ip.group(1) if fallback_ip else None
@@ -460,7 +446,6 @@ def _parse_received_hop(raw: str) -> dict:
         hop["tls_version"] = m4.group(1)
         hop["tls_cipher"]  = m4.group(2)
 
-    # Raccoglie tutti gli IP univoci presenti nell'header usando la nuova regex
     hop["all_ips"] = list(dict.fromkeys(_IP_RE.findall(clean_raw)))
 
     return hop
@@ -535,7 +520,8 @@ class EmlSOCAnalyzer:
         report["reply_to_mismatch"] = bool(
             reply_addr and from_addr and reply_addr.lower() != from_addr.lower()
         )
-        # Anomaly: Return-Path domain ≠ From domain (server spoofing signal)
+
+        # Anomaly: Return-Path domain ≠ From domain
         return_path_addr   = self._extract_address(report["return_path"])
         return_path_domain = _extract_domain(return_path_addr or "") if return_path_addr else ""
         from_domain        = _extract_domain(from_addr or "") if from_addr else ""
@@ -546,8 +532,6 @@ class EmlSOCAnalyzer:
         report["return_path_domain"] = return_path_domain
 
         # Anomaly: Display Name contains an email address DIFFERENT from the actual sender
-        # e.g. From: "support@paypal.com" <attacker@evil.com>  ← spoofing reale
-        #      From: "Mario Rossi mario@example.com" <mario@example.com>  ← stesso indirizzo, non segnalare
         display_name_email_match = None
         if report["from_"]:
             dn_match = re.match(r'^"?([^"<]+)"?\s*<', report["from_"])
@@ -556,12 +540,9 @@ class EmlSOCAnalyzer:
                 embedded = re.search(r"[\w.+\-]+@[\w.\-]+", dn)
                 if embedded:
                     embedded_addr = embedded.group(0).lower()
-                    # Segnala solo se l'indirizzo embedded è DIVERSO dal mittente reale
                     if from_addr and embedded_addr != from_addr.lower():
                         display_name_email_match = embedded_addr
-        report["display_name_spoofing"] = display_name_email_match  # None oppure l'indirizzo spoofato
-        
- 
+        report["display_name_spoofing"] = display_name_email_match
 
         # ------------------------------------------------------------------ #
         # 3. Google / routing metadata
@@ -581,10 +562,10 @@ class EmlSOCAnalyzer:
         # ------------------------------------------------------------------ #
         raw_received = msg.get_all("Received") or []
         hops = [_parse_received_hop(r) for r in raw_received]
-        report["received_hops"] = hops
-        report["closest_to_recipient"] = hops[0]  if hops else {}
-        report["injection_server"]     = hops[1]  if len(hops) > 1 else {}
-        report["closest_to_sender"]    = hops[-1] if hops else {}
+        report["received_hops"]         = hops
+        report["closest_to_recipient"]  = hops[0]  if hops else {}
+        report["injection_server"]      = hops[1]  if len(hops) > 1 else {}
+        report["closest_to_sender"]     = hops[-1] if hops else {}
 
         # Convenience: IP del server di iniezione (usato dai validator SPF)
         report["injection_sender_ip"] = self._extract_spf_sender_ip(msg, hops)
@@ -611,8 +592,8 @@ class EmlSOCAnalyzer:
         # ------------------------------------------------------------------ #
         # 9. Body parts & attachments (with magic byte check)
         # ------------------------------------------------------------------ #
-        body_parts       = []   # text/plain parti (priorità)
-        html_parts       = []   # text/html parti (fallback)
+        body_parts       = []
+        html_parts       = []
         attachments_info = []
 
         for part in msg.walk():
@@ -641,29 +622,20 @@ class EmlSOCAnalyzer:
                     charset = part.get_content_charset() or "utf-8"
                     html_parts.append(payload.decode(charset, errors="ignore"))
 
-        # body grezzo: text/plain se disponibile, altrimenti HTML grezzo come fallback
         raw_body = "\n".join(body_parts) if body_parts else "\n".join(html_parts)
         report["body"] = raw_body.strip()
 
-        # body_html: l'HTML grezzo originale (per rendering e analisi link futura)
         report["body_html"] = "\n".join(html_parts).strip() if html_parts else None
 
-        # body_clean: testo pulito dai tag HTML — input canonico per BERT e analisi testuali.
-        # Se il body grezzo è già text/plain, non serve stripping; lo applichiamo
-        # solo se l'unica fonte disponibile era HTML.
         if body_parts:
-            # Testo già pulito — normalizza solo whitespace
             report["body_clean"] = re.sub(r"\n{3,}", "\n\n", report["body"]).strip()
         else:
-            # Corpo era HTML: esegui stripping completo
             combined_html = "\n".join(html_parts)
             report["body_clean"] = _strip_html(combined_html)
 
-        # Segnala nel report quale metodo è stato usato (utile per debug nella UI)
-        report["body_source"]       = "text/plain" if body_parts else ("text/html" if html_parts else "empty")
+        report["body_source"]        = "text/plain" if body_parts else ("text/html" if html_parts else "empty")
         report["html_strip_applied"] = (not bool(body_parts)) and bool(html_parts)
-
-        report["attachments"] = attachments_info
+        report["attachments"]        = attachments_info
 
         # ------------------------------------------------------------------ #
         # 10. Link extraction + lookalike domain detection
@@ -802,9 +774,12 @@ class EmlSOCAnalyzer:
 
         # Reply-To mismatch
         if report["reply_to_mismatch"]:
-            flag("HIGH", "Reply-To",
-                 f"Reply-To ({report['reply_to']}) differs da From ({report['from_']}) — possibile harvesting")
-                # Return-Path domain mismatch (server spoofing / bounce harvesting)
+            flag(
+                "HIGH", "Reply-To",
+                f"Reply-To ({report['reply_to']}) differs da From ({report['from_']}) — possibile harvesting",
+            )
+
+        # Return-Path domain mismatch
         if report.get("return_path_domain_mismatch"):
             _from_domain = _extract_domain(
                 EmlSOCAnalyzer._extract_address(report.get("from_") or "") or ""
@@ -813,45 +788,50 @@ class EmlSOCAnalyzer:
                 "HIGH", "Return-Path",
                 f"Il dominio Return-Path (`{report['return_path_domain']}`) differisce dal "
                 f"dominio From (`{_from_domain}`) — il server che riceverà i bounce "
-                "non è controllato dal mittente dichiarato. Tipico di phishing o BEC."
+                "non è controllato dal mittente dichiarato. Tipico di phishing o BEC.",
             )
         elif report.get("return_path") and not report.get("return_path_domain"):
             flag("LOW", "Return-Path", "Return-Path presente ma dominio non estraibile")
-        # HTML stripping applicato — segnala che il corpo era HTML puro
-        if report.get("html_strip_applied"):
-            flag("INFO", "Body",
-                 "Corpo email in formato HTML puro: tag rimossi prima dell'analisi AI. "
-                 "Possibile offuscamento testuale nascosto nei tag.")
 
-             # Display Name Spoofing
+        # HTML stripping applicato
+        if report.get("html_strip_applied"):
+            flag(
+                "INFO", "Body",
+                "Corpo email in formato HTML puro: tag rimossi prima dell'analisi AI. "
+                "Possibile offuscamento testuale nascosto nei tag.",
+            )
+
+        # Display Name Spoofing
         dns_val = report.get("display_name_spoofing")
         if dns_val:
             flag(
                 "HIGH", "Display Name",
                 f"Il Display Name del campo From contiene un indirizzo email (`{dns_val}`). "
                 "Tecnica classica di Display Name Spoofing: i client di posta mostrano "
-                "l'indirizzo embedded invece del mittente reale."
+                "l'indirizzo embedded invece del mittente reale.",
             )
-    
-    
-        # Injection server anomaly
+
+        # Injection server info
         inj = report.get("injection_server", {})
         if inj.get("sender_ip"):
-            flag("INFO", "Received",
-                 f"Server di iniezione: {inj.get('sender_domain') or inj.get('from_host', '?')} "
-                 f"[{inj['sender_ip']}] — verificare reputazione IP/dominio")
+            flag(
+                "INFO", "Received",
+                f"Server di iniezione: {inj.get('sender_domain') or inj.get('from_host', '?')} "
+                f"[{inj['sender_ip']}] — verificare reputazione IP/dominio",
+            )
 
         # Attachment anomalies
         for att in report.get("attachments", []):
             if att.get("anomaly"):
-                flag("HIGH", "Attachment",
-                     f"'{att['filename']}': {att['anomaly']}")
+                flag("HIGH", "Attachment", f"'{att['filename']}': {att['anomaly']}")
             if att.get("magic_bytes_hex"):
-                flag("INFO", "Attachment",
-                     f"'{att['filename']}': magic bytes {att['magic_bytes_hex'][:8]}… "
-                     f"→ formato rilevato: {att['magic_detected_format'] or 'sconosciuto'}")
+                flag(
+                    "INFO", "Attachment",
+                    f"'{att['filename']}': magic bytes {att['magic_bytes_hex'][:8]}… "
+                    f"→ formato rilevato: {att['magic_detected_format'] or 'sconosciuto'}",
+                )
 
-        # Link anomalies: IP-direct e lookalike
+        # Link anomalies: IP-direct
         for lnk in report.get("links", []):
             if lnk.get("is_ip"):
                 flag(
@@ -860,6 +840,7 @@ class EmlSOCAnalyzer:
                     "tipico di phishing o C2",
                 )
 
+        # Lookalike domain alerts
         for alert in report.get("lookalike_alerts", []):
             technique_label = {
                 "edit_distance": "Edit-distance",
@@ -873,31 +854,23 @@ class EmlSOCAnalyzer:
             )
 
         return flags
-    
+
     @staticmethod
     def _extract_spf_sender_ip(msg, hops: list) -> str | None:
         """
         Estrae l'IP corretto da usare per la verifica SPF live.
 
-        L'IP giusto è quello che il primo MX ricevente (più vicino al mittente)
-        ha visto arrivare la connessione SMTP — non un relay interno successivo.
-
         Priorità di estrazione:
-
         1. client-ip= nell'ULTIMO Received-SPF header (più vicino al mittente)
-           ← più affidabile: scritto dal server che ha effettivamente verificato SPF.
-           msg.get() restituisce solo il PRIMO header; serve get_all() + last().
         2. smtp.remote-ip= in Authentication-Results
-        3. IP pubblico nell'ultimo hop Received (più vicino al mittente)
-        4. Fallback: sender_ip dall'hop [1] (vecchio comportamento)
+        3. IP pubblico nell'ultimo hop Received
+        4. Fallback: sender_ip dall'hop [1]
         """
         _private = re.compile(
             r'^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.)'
         )
 
-        # 1. Received-SPF: client-ip= — usa l'ULTIMO header (più vicino al mittente)
-        #    get_all() restituisce la lista nell'ordine top→bottom degli header,
-        #    quindi il più vicino al mittente è l'ultimo elemento.
+        # 1. Received-SPF: client-ip=
         all_rcvd_spf = msg.get_all('Received-SPF') or []
         for rcvd_spf in reversed(all_rcvd_spf):
             m = re.search(r'client-ip=([\d.a-fA-F:]+)', str(rcvd_spf), re.IGNORECASE)
@@ -917,5 +890,5 @@ class EmlSOCAnalyzer:
                 if ip and not _private.match(ip):
                     return ip
 
-        # 4. Fallback legacy: hop [1]
+        # 4. Fallback legacy
         return (hops[1].get('sender_ip') if len(hops) > 1 else None)

@@ -59,7 +59,8 @@ st.markdown(
 st.divider()
 
 
-# ── navigazione sidebar ────────────────────────────────────────────────────
+# ── navigazione sidebar & Raw Debug ────────────────────────────────────────
+# ── navigazione sidebar & Raw Debug ────────────────────────────────────────
 with st.sidebar:
     st.markdown("## 🛡️ FishStop")
     page = st.radio(
@@ -68,9 +69,26 @@ with st.sidebar:
         label_visibility="collapsed",
     )
     st.divider()
+
+    # Controlla se c'è un EML salvato in sessione da mostrare nel debugger
+    if "raw_eml_debug_data" in st.session_state and st.session_state["raw_eml_debug_data"]:
+        st.markdown("### 🪲 Raw EML Debugger")
+        
+        # Generiamo una chiave unica basata sulla lunghezza e sul contenuto del testo
+        # Questo costringe Streamlit ad aggiornare l'area di testo istantaneamente
+        text_value = st.session_state["raw_eml_debug_data"]
+        dynamic_key = f"sidebar_debug_{len(text_value)}_{hash(text_value)}"
+        
+        st.text_area(
+            label="Contenuto MIME originale",
+            value=text_value,
+            height=450,
+            disabled=True,
+            key=dynamic_key
+        )
+        st.divider()
+
     st.caption("FishStop — Email Security Platform")
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # DATASET BUILDER
 # ══════════════════════════════════════════════════════════════════════════════
@@ -587,6 +605,14 @@ else:
         )
 
         if uploaded_file is not None:
+            # Estrae il testo dell'email appena caricata
+            raw_text = uploaded_file.getvalue().decode("utf-8", errors="ignore")
+            
+            # Se il testo è diverso da quello in sessione, aggiorna e resetta i vecchi stati
+            if st.session_state.get("raw_eml_debug_data") != raw_text:
+                st.session_state["raw_eml_debug_data"] = raw_text
+                st.rerun()
+
             st.success("File caricato correttamente! Elaborazione in corso…")
             temp_path = os.path.join("data", "raw", "temp_triage.eml")
             os.makedirs(os.path.dirname(temp_path), exist_ok=True)
@@ -660,6 +686,7 @@ else:
 
                     _domains_to_check: dict[str, str] = {}
                     import re as _re
+                    from concurrent.futures import ThreadPoolExecutor  # <-- IMPORTA QUESTO
 
                     def _pull_domain(raw: str | None) -> str:
                         if not raw:
@@ -681,27 +708,48 @@ else:
                     if not _domains_to_check:
                         st.info("Nessun dominio mittente estraibile dagli header.")
                     else:
-                        for _lbl, _dom in _domains_to_check.items():
+                        # Creiamo una funzione helper per parallelizzare il check e il potenziale fallback
+                        def _fetch_domain_data(label, domain):
+                            # Chiamata principale
+                            rep = validator.check_domain_reputation(domain)
+                            
+                            # Logica di fallback sul parent domain (se il sottodominio non esiste)
+                            if rep["status"] == "skipped" and ("non esiste" in rep.get("message", "") or "NXDOMAIN" in rep.get("message", "")):
+                                parts = domain.split(".")
+                                if len(parts) >= 3 and len(parts[-2]) <= 3 and parts[-1] in ["uk", "it", "au", "br", "za", "jp"]:
+                                    _parent_dom = ".".join(parts[-3:])
+                                elif len(parts) > 2:
+                                    _parent_dom = ".".join(parts[-2:])
+                                else:
+                                    _parent_dom = domain
+
+                                if _parent_dom != domain:
+                                    # Esegue la seconda chiamata di fallback
+                                    rep = validator.check_domain_reputation(_parent_dom)
+                                    rep["used_parent_fallback"] = _parent_dom  # Flag custom per la UI
+                            
+                            return label, domain, rep
+
+                        # Eseguiamo i controlli di reputazione in parallelo usando i thread
+                        with st.spinner("Analisi reputazione domini in corso in parallelo..."):
+                            with ThreadPoolExecutor(max_workers=3) as executor:
+                                # Lanciamo i thread per ogni dominio da controllare
+                                futures = [
+                                    executor.submit(_fetch_domain_data, _lbl, _dom)
+                                    for _lbl, _dom in _domains_to_check.items()
+                                ]
+                                # Raccogliamo i risultati completati
+                                parallel_results = [f.result() for f in futures]
+
+                        # Ora che abbiamo TUTTI i dati istantaneamente, eseguiamo solo il rendering visivo
+                        for _lbl, _dom, _dom_rep in parallel_results:
                             with st.expander(f"🌐 {_lbl}"):
-                                with st.spinner(f"Interrogazione AbuseIPDB per `{_dom}`…"):
-                                    _dom_rep = validator.check_domain_reputation(_dom)
-
-                                if _dom_rep["status"] == "skipped" and ("non esiste" in _dom_rep.get("message", "") or "NXDOMAIN" in _dom_rep.get("message", "")):
-                                    parts = _dom.split(".")
-                                    if len(parts) >= 3 and len(parts[-2]) <= 3 and parts[-1] in ["uk", "it", "au", "br", "za", "jp"]:
-                                        _parent_dom = ".".join(parts[-3:])
-                                    elif len(parts) > 2:
-                                        _parent_dom = ".".join(parts[-2:])
-                                    else:
-                                        _parent_dom = _dom
-
-                                    if _parent_dom != _dom:
-                                        st.warning(f"⚠️ Il dominio `{_dom}` non è risolvibile. Provo il dominio parent universale: `{_parent_dom}`...")
-                                        with st.spinner(f"Interrogazione AbuseIPDB per il parent `{_parent_dom}`…"):
-                                            _dom_rep = validator.check_domain_reputation(_parent_dom)
-
+                                # Se è stato usato il fallback, lo notifichiamo all'utente
+                                if "_parent_dom" in _dom_rep.get("message", "") or _dom_rep.get("used_parent_fallback"):
+                                    parent_used = _dom_rep.get("used_parent_fallback", "parent")
+                                    st.warning(f"⚠️ Il dominio `{_dom}` non era risolvibile. È stato analizzato il dominio parent: `{parent_used}`")
+                                
                                 _render_abuseipdb(_dom_rep, label=_lbl)
-
                 # ── 1b. Catena Received ────────────────────────────────────
                 with st.expander("📡 Catena Received (routing hop-by-hop)"):
                     hops = soc["received_hops"]
