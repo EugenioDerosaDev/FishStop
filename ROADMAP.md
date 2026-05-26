@@ -131,6 +131,8 @@ aggiungere selezione per far si di essere comply con tesseract
 6. spf non prende bene IPv4
 7. colab integrato per addestrare modello
 8. EDA (exploratory analysis del modello se possibile)
-9. claude.md + claude school 
+9. claude.md + claude school
+10. aggiungere cose di Cybersecurity SOC Analyst Lab - Analisi e-mail (PhishStrike)
+
 
 
