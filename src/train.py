@@ -15,7 +15,7 @@ except ImportError:
 import pandas as pd
 import numpy as np
 import torch
-import kagglehub
+#import kagglehub
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     accuracy_score, precision_recall_fscore_support,
@@ -31,7 +31,7 @@ from datasets import Dataset
 from src.parser import EmailParserPipeline
 from src.eml_dataset_builder import EmlDatasetBuilder
 
-
+kagglehub=""
 class BERTPhishingTrainer:
     def __init__(self, model_name="bert-base-uncased", num_labels=2):
         print("[*] Inizializzazione di BERT Tokenizer e Modello...")
